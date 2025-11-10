@@ -24,3 +24,28 @@ def plot(csv_path="data/logs/carla_rearend_numeric.csv"):
 
 if __name__ == "__main__":
     plot()
+
+def plot_agv(csv_path="data/logs/agv_queue_numeric.csv"):
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    df = pd.read_csv(csv_path)
+
+    plt.figure()
+    plt.step(df["t"], df["a0_pos"], where="post", label="AGV0 (follower)")
+    plt.step(df["t"], df["a1_pos"], where="post", label="AGV1 (leader)")
+    plt.xlabel("time [step]"); plt.ylabel("cell index")
+    plt.title("AGV positions across junction")
+    plt.legend()
+
+    plt.figure()
+    plt.step(df["t"], df["headway_cells"], where="post")
+    plt.xlabel("time [step]"); plt.ylabel("headway [cells]")
+    plt.title("Headway (should be ≥ 1 cell)")
+    plt.show()
+
+if __name__ == "__main__":
+    # Keep existing plots for the rear-end; add this call to show AGV plots too
+    try:
+        plot_agv()
+    except Exception as e:
+        print("AGV plot skipped:", e)
