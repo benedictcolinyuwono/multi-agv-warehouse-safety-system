@@ -8,8 +8,8 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/project
 WorldInfo {
 }
 Viewpoint {
-  orientation -0.5623686871770477 0.6047992576945254 0.5638788146179238 2.0516499142632867
-  position -2.6670229922445717e-05 -0.0061005967481790584 5.939403037860523
+  orientation -0.5773502691896258 0.5773502691896258 0.5773502691896258 2.0944
+  position -4.414154566648529e-06 -4.41416705129723e-06 3.7731705391120145
 }
 TexturedBackground {
 }
@@ -20,20 +20,24 @@ RectangleArena {
 }
 Pioneer3dx {
   translation -0.6 0.1 0.4
+  rotation 0 1 0 0
   controller "ss_controller"
 }
 Pioneer3dx {
   translation -0.2 0.1 0.4
+  rotation 0 1 0 0
   name "Pioneer 3-DX(1)"
   controller "ss_controller"
 }
 Pioneer3dx {
   translation 0.2 0.1 0.4
+  rotation 0 1 0 0
   name "Pioneer 3-DX(2)"
   controller "ss_controller"
 }
 Pioneer3dx {
   translation 0.6 0.1 0.4
+  rotation 0 1 0 0
   name "Pioneer 3-DX(3)"
   controller "ss_controller"
 }
