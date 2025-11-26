@@ -1,53 +1,58 @@
-# scripts/run_numeric_agv.py
 import csv
-from sims.agv_queue_numeric import AGV, step_grid, occupied_cells
+from sims.agv_queue_numeric import AGV, step_with_reservations, get_occupied_cells
+
+NUM_CELLS = 12
+NUM_STEPS = 40
+JUNCTION_CELL = 6
+MIN_HEADWAY_CELLS = 1
+
 
 def run(output_csv="data/logs/agv_queue_numeric.csv",
-        cells=12, steps=40, junction_cell=6):
-    """
-    1D lane of 'cells' with a single junction at J.
-    Two AGVs move toward the end; rules:
-      - headway >= 1 empty cell (i.e., gap_cells >= 1)
-      - don't block the box: only enter junction cell J if J+1 is free
-    """
+        cells=NUM_CELLS, steps=NUM_STEPS, junction_cell=JUNCTION_CELL):
     J = junction_cell
-    agvs = [AGV(id=0, pos=0, goal=cells-1),   # follower
-            AGV(id=1, pos=2, goal=cells-1)]  # leader (ahead by 2 cells)
-
+    
+    agvs = [
+        AGV(id=0, pos=0, goal=cells-1),
+        AGV(id=1, pos=2, goal=cells-1)
+    ]
+    
     with open(output_csv, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["t","a0_pos","a1_pos","headway_cells","entered_junction"])
-
+        writer = csv.writer(f)
+        writer.writerow(["t", "a0_pos", "a1_pos", "headway_cells", "entered_junction"])
+        
         for t in range(steps):
-            occ = occupied_cells(agvs)
+            occ = get_occupied_cells(agvs)
             gap_cells = agvs[1].pos - agvs[0].pos
-            headway_cells = gap_cells if gap_cells > 0 else 0
-
+            headway_cells = max(gap_cells, 0)
+            
             reservations = set()
+            
+            next_leader = agvs[1].pos + 1
+            can_enter = True
+            if next_leader == J:
+                can_enter = (J + 1) not in occ
+            if can_enter:
+                reservations.add(next_leader)
+            
+            next_follower = agvs[0].pos + 1
+            if headway_cells >= MIN_HEADWAY_CELLS + 1:
+                can_enter = True
+                if next_follower == J:
+                    can_enter = (J + 1) not in occ
+                if can_enter:
+                    reservations.add(next_follower)
+            
+            before = (agvs[0].pos == J-1) or (agvs[1].pos == J-1)
+            agvs = step_with_reservations(agvs, reservations)
+            after = (agvs[0].pos == J) or (agvs[1].pos == J)
+            
+            writer.writerow([
+                t, agvs[0].pos, agvs[1].pos, headway_cells,
+                int(after and not before)
+            ])
+    
+    print(f"Simulation complete: {output_csv}")
 
-            # Leader (AGV1)
-            next1 = agvs[1].pos + 1
-            enter1_ok = True
-            if next1 == J:                       # entering junction?
-                enter1_ok = (J + 1) not in occ   # exit must be free
-            if enter1_ok:
-                reservations.add(next1)
-
-            # Follower (AGV0) — keep >=1 empty cell between them
-            next0 = agvs[0].pos + 1
-            if headway_cells >= 2:               # at least one empty cell in between
-                enter0_ok = True
-                if next0 == J:
-                    enter0_ok = (J + 1) not in occ
-                if enter0_ok:
-                    reservations.add(next0)
-
-            before_enter = (agvs[0].pos == J-1) or (agvs[1].pos == J-1)
-            agvs = step_grid(agvs, reservations)
-            after_enter = (agvs[0].pos == J) or (agvs[1].pos == J)
-
-            w.writerow([t, agvs[0].pos, agvs[1].pos, headway_cells,
-                        int(after_enter and not before_enter)])
 
 if __name__ == "__main__":
     run()

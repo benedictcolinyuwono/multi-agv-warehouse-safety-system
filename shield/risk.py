@@ -1,21 +1,35 @@
 import math
 
-def ttc(ego_x, ego_v, lead_x, lead_v, eps=1e-6):
-    rel_x = lead_x - ego_x
-    rel_v = ego_v - lead_v
-    if rel_v <= 0:  # not closing
+def time_to_collision(ego_x, ego_v, lead_x, lead_v, epsilon=1e-6):
+    gap = lead_x - ego_x
+    closing_speed = ego_v - lead_v
+    if closing_speed <= 0:
         return math.inf
-    return max(rel_x / max(rel_v, eps), 0.0)
+    ttc_seconds = gap / max(closing_speed, epsilon)
+    return max(ttc_seconds, 0.0)
 
-def headway(ego_v, gap_m, eps=1e-6):
-    return math.inf if abs(ego_v) < eps else gap_m / max(ego_v, eps)
 
-def pack_risk(state):
-    t = ttc(state["ego_x"], state["ego_v"], state["lead_x"], state["lead_v"])
-    h = headway(state["ego_v"], state["gap_m"])
+def time_headway(ego_v, gap_m, epsilon=1e-6):
+    if abs(ego_v) < epsilon:
+        return math.inf
+    return gap_m / max(ego_v, epsilon)
+
+
+def assess_collision_risk(state):
+    WARNING_THRESHOLD = 2.0
+    CRITICAL_THRESHOLD = 1.0
+    ttc = time_to_collision(
+        state["ego_x"], state["ego_v"],
+        state["lead_x"], state["lead_v"]
+    )
+    headway = time_headway(state["ego_v"], state["gap_m"])
     return {
-        "ttc": t,
-        "headway": h,
-        "margin_low": (t < 2.0 or h < 2.0),
-        "violation_predicted": (t < 1.0 or h < 1.0),
+        "ttc": ttc,
+        "headway": headway,
+        "margin_low": (ttc < WARNING_THRESHOLD or headway < WARNING_THRESHOLD),
+        "violation_predicted": (ttc < CRITICAL_THRESHOLD or headway < CRITICAL_THRESHOLD),
     }
+
+ttc = time_to_collision
+headway = time_headway
+pack_risk = assess_collision_risk

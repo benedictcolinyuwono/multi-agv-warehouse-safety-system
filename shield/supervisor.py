@@ -1,12 +1,30 @@
-from .limiter import limit_speed
+from .limiter import limit_velocity
 
-PASS, GUARDED, SAFE = "PASS", "GUARDED", "SAFE"
+MODE_PASS = "PASS"
+MODE_GUARDED = "GUARDED"
+MODE_EMERGENCY = "EMERGENCY"
 
-def supervise(state, cmd, risk):
-    v_cmd, w_cmd = cmd
-    if risk["violation_predicted"]:
-        return SAFE, (0.0, 0.0)
-    if risk["margin_low"]:
-        v_out = limit_speed(v_cmd, risk["ttc"], risk["headway"], state["v_cap"])
-        return GUARDED, (v_out, 0.0)  # keep straight for v1
-    return PASS, (v_cmd, w_cmd)
+PASS = MODE_PASS
+GUARDED = MODE_GUARDED
+SAFE = MODE_EMERGENCY
+
+
+def supervise_commands(state, commanded_velocities, risk_assessment):
+    v_cmd, w_cmd = commanded_velocities
+    
+    if risk_assessment["violation_predicted"]:
+        return MODE_EMERGENCY, (0.0, 0.0)
+    
+    if risk_assessment["margin_low"]:
+        v_safe = limit_velocity(
+            v_cmd,
+            risk_assessment["ttc"],
+            risk_assessment["headway"],
+            state["v_cap"]
+        )
+        return MODE_GUARDED, (v_safe, 0.0)
+    
+    return MODE_PASS, (v_cmd, w_cmd)
+
+
+supervise = supervise_commands

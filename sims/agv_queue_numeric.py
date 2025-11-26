@@ -1,22 +1,27 @@
-# sims/agv_queue_numeric.py
 from dataclasses import dataclass
 from typing import List, Set
+
 
 @dataclass
 class AGV:
     id: int
-    pos: int      # current cell index on a 1D lane
-    goal: int     # last cell index to reach
+    pos: int
+    goal: int
 
-def occupied_cells(agvs: List[AGV]) -> Set[int]:
-    return {a.pos for a in agvs}
 
-def step_grid(agvs: List[AGV], reservations: Set[int]) -> List[AGV]:
-    """Advance AGVs by one cell if their next cell was reserved this tick."""
-    moved = []
-    for a in agvs:
-        nxt = a.pos + 1
-        if nxt in reservations:
-            a = AGV(a.id, nxt, a.goal)
-        moved.append(a)
-    return moved
+def get_occupied_cells(agvs: List[AGV]) -> Set[int]:
+    return {agv.pos for agv in agvs}
+
+
+def step_with_reservations(agvs: List[AGV], reservations: Set[int]) -> List[AGV]:
+    updated_agvs = []
+    for agv in agvs:
+        next_cell = agv.pos + 1
+        if next_cell in reservations:
+            agv = AGV(agv.id, next_cell, agv.goal)
+        updated_agvs.append(agv)
+    return updated_agvs
+
+
+occupied_cells = get_occupied_cells
+step_grid = step_with_reservations

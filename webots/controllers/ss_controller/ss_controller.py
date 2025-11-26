@@ -1,4 +1,4 @@
-from controller import Robot
+from controller import Robot    #type: ignore
 
 robot = Robot()
 timestep = int(robot.getBasicTimeStep())

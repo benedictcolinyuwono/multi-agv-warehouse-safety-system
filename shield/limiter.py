@@ -1,8 +1,23 @@
-def limit_speed(v_cmd, ttc_s, headway_s, v_cap, ttc_thr=1.5, headway_thr=1.5):
-    v = min(v_cmd, v_cap)
-    if ttc_s < ttc_thr or headway_s < headway_thr:
-        v = min(v, 0.0)  # v1: safe stop when margin low
-    return max(v, 0.0)
+def limit_velocity(v_cmd, ttc_s, headway_s, v_max):
+    CRITICAL_THRESHOLD = 1.0
+    WARNING_THRESHOLD = 2.0
+    
+    v_limited = min(v_cmd, v_max)
+    min_safety_margin = min(ttc_s, headway_s)
+    
+    if min_safety_margin < CRITICAL_THRESHOLD:
+        v_limited = 0.0
+    elif min_safety_margin < WARNING_THRESHOLD:
+        safety_factor = (min_safety_margin - CRITICAL_THRESHOLD) / \
+                       (WARNING_THRESHOLD - CRITICAL_THRESHOLD)
+        v_limited = v_limited * safety_factor
+    
+    return max(v_limited, 0.0)
 
-def limit_turn(w_cmd, w_cap):
-    return max(min(w_cmd, w_cap), -w_cap)
+
+def limit_angular_velocity(w_cmd, w_max):
+    return max(min(w_cmd, w_max), -w_max)
+
+
+limit_speed = limit_velocity
+limit_turn = limit_angular_velocity
