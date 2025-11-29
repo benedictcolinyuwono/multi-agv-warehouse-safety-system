@@ -7,8 +7,8 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/project
 WorldInfo {
 }
 Viewpoint {
-  orientation -0.5773502691896258 0.5773502691896258 0.5773502691896258 2.0944
-  position -8.39664565572272 8.964184376163047 283.83195831499893
+  orientation -0.5507151989823997 0.48340303456370753 0.6804662194292783 2.0647414746704946
+  position 27.15090393027903 34.69538017072355 81.872449189303
 }
 TexturedBackground {
   texture "noon_sunny_empty"
@@ -1512,8 +1512,7 @@ DEF FG_PalletizingConveyors Group {
 DEF AGV Group {
   children [
     SummitXlSteel {
-      translation 5.551004479986579 41.99995129259294 0.1952630547116069
-      rotation -0.0015764810861591864 -0.9999892249198864 -0.004366320133691725 0.0017723885036786584
+      translation 5.55 42 0.287009
       name "AGV_1"
       controller "ss_controller"
     }
