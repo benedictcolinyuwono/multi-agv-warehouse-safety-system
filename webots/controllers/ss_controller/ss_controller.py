@@ -9,6 +9,7 @@ from shield.risk import assess_collision_risk_2d
 from shield.limiter import limit_velocity, limit_angular_velocity
 from shield.supervisor import supervise_commands, PASS, GUARDED, EMERGENCY
 from geometry_utils import closest_point_on_rectangle
+from waypoints import warehouse_waypoints
 
 # ROBOT INITIALIZATION
 robot = Supervisor()
@@ -54,27 +55,29 @@ DWA_ALPHA = 1.5
 DWA_BETA = 1.8
 DWA_GAMMA = 1.0
 
-# WAYPOINT GOALS
+# WAYPOINT GOALS - Assign each AGV a test destination
 waypoint_goals = {
-    'AGV_1': (65.0, 50.0),      # Open area top right
-    'AGV_2': (65.0, 25.0),      # Open area middle right
-    'AGV_3': (65.0, 5.0),       # Open area between sections
-    'AGV_4': (-95.0, 50.0),     # Open area top left
-    'AGV_5': (-95.0, 25.0),     # Open area middle left
-    'AGV_6': (15.0, -10.0),     # Center aisle
-    'AGV_7': (25.0, -65.0),     # Bottom section open area
-    'AGV_8': (50.0, -65.0),     # Bottom section middle
-    'AGV_9': (75.0, -65.0),     # Bottom section right
-    'AGV_10': (-30.0, 50.0),    # Top section middle aisle
-    'AGV_11': (-60.0, 50.0),    # Top section left aisle
-    'AGV_12': (-30.0, 5.0),     # Middle section aisle
-    'AGV_13': (-60.0, -30.0),   # Middle section left
-    'AGV_14': (30.0, 30.0),     # Top section right aisle
-    'AGV_15': (-80.0, -65.0),   # Bottom section far left
+    'AGV_1': ('row_a_aisle_1', 3),      # Row A, Aisle 1, Position 3
+    'AGV_2': ('row_a_aisle_5', 2),      # Row A, Aisle 5, Position 2
+    'AGV_3': ('row_b_aisle_3', 4),      # Row B, Aisle 3, Position 4
+    'AGV_4': ('middle_aisle_7', 5),     # Middle, Aisle 7, Position 5
+    'AGV_5': ('middle_aisle_2', 1),     # Middle, Aisle 2, Position 1
+    'AGV_6': ('bottom_aisle_4', 3),     # Bottom, Aisle 4, Position 3
+    'AGV_7': ('conveyor_1a_pickup', 7), # Conveyor 1A, Position 7
+    'AGV_8': ('conveyor_2a_pickup', 10),# Conveyor 2A, Position 10
+    'AGV_9': ('conveyor_3_pickup', 8),  # Conveyor 3, Position 8
+    'AGV_10': ('row_a_aisle_10', 6),    # Row A, Aisle 10, Position 6
+    'AGV_11': ('row_b_aisle_8', 5),     # Row B, Aisle 8, Position 5
+    'AGV_12': ('middle_aisle_12', 4),   # Middle, Aisle 12, Position 4
+    'AGV_13': ('bottom_aisle_2', 2),    # Bottom, Aisle 2, Position 2
+    'AGV_14': ('row_a_aisle_15', 7),    # Row A, Aisle 15, Position 7
+    'AGV_15': ('bottom_aisle_6', 5),    # Bottom, Aisle 6, Position 5
 }
 
-target_waypoint_x, target_waypoint_y = waypoint_goals[robot_name]
-print(f"{robot_name} starting navigation to waypoint ({target_waypoint_x}, {target_waypoint_y})")
+# Get target waypoint for this AGV
+aisle_name, position_index = waypoint_goals[robot_name]
+target_waypoint_x, target_waypoint_y = warehouse_waypoints[aisle_name][position_index]
+print(f"{robot_name} navigating to {aisle_name}, position {position_index}: ({target_waypoint_x:.2f}, {target_waypoint_y:.2f})")
 
 # OBSTACLE DEFINITIONS
 rack_definitions = [
@@ -92,21 +95,20 @@ rack_definitions = [
     ("FG_Top_RackRowB_7", 8.7, 31.7), ("FG_Top_RackRowB_8", 8.7, 31.7),
     ("FG_Top_RackRowB_9", 8.7, 31.7), ("FG_Top_RackRowB_10", 8.7, 31.7),
     ("FG_Top_RackRowB_11", 8.7, 31.7), ("FG_Top_RackRowB_12", 8.7, 31.7),
-    ("FG_Top_RackRowB_13", 8.7, 31.7), ("FG_Top_RackRowR_1", 5.1, 15.3),
-    ("FG_Top_RackRowR_2", 5.1, 15.3), ("FG_Middle_RackRow_1", 8.7, 37.0),
-    ("FG_Middle_RackRow_2", 8.7, 37.0), ("FG_Middle_RackRow_3", 8.7, 37.0),
-    ("FG_Middle_RackRow_4", 8.7, 37.0), ("FG_Middle_RackRow_5", 8.7, 37.0),
-    ("FG_Middle_RackRow_6", 8.7, 37.0), ("FG_Middle_RackRow_7", 8.7, 37.0),
-    ("FG_Middle_RackRow_8", 8.7, 37.0), ("FG_Middle_RackRow_9", 8.7, 37.0),
-    ("FG_Middle_RackRow_10", 8.7, 37.0), ("FG_Middle_RackRow_11", 8.7, 37.0),
-    ("FG_Middle_RackRow_12", 8.7, 37.0), ("FG_Middle_RackRow_13", 8.7, 37.0),
-    ("FG_Middle_RackRow_14", 8.7, 37.0), ("FG_Middle_RackRowR_1", 5.1, 15.3),
-    ("FG_Middle_RackRowR_2", 5.1, 15.3), ("FG_Bottom_RackRow_1", 8.7, 31.7),
-    ("FG_Bottom_RackRow_2", 8.7, 31.7), ("FG_Bottom_RackRow_3", 8.7, 31.7),
-    ("FG_Bottom_RackRow_4", 8.7, 31.7), ("FG_Bottom_RackRow_5", 8.7, 31.7),
-    ("FG_Bottom_RackRow_6", 8.7, 31.7), ("FG_Bottom_RackRow_7", 8.7, 31.7),
-    ("FG_Bottom_RackRow_8", 8.7, 31.7), ("FG_Bottom_RackRowR_1", 5.1, 15.3),
-    ("FG_Bottom_RackRowR_2", 5.1, 15.3),
+    ("FG_Top_RackRowB_13", 8.7, 31.7), ("FG_Top_RackRowR_1", 11.3, 15.3),
+    ("FG_Middle_RackRow_1", 8.7, 37.0), ("FG_Middle_RackRow_2", 8.7, 37.0),
+    ("FG_Middle_RackRow_3", 8.7, 37.0), ("FG_Middle_RackRow_4", 8.7, 37.0),
+    ("FG_Middle_RackRow_5", 8.7, 37.0), ("FG_Middle_RackRow_6", 8.7, 37.0),
+    ("FG_Middle_RackRow_7", 8.7, 37.0), ("FG_Middle_RackRow_8", 8.7, 37.0),
+    ("FG_Middle_RackRow_9", 8.7, 37.0), ("FG_Middle_RackRow_10", 8.7, 37.0),
+    ("FG_Middle_RackRow_11", 8.7, 37.0), ("FG_Middle_RackRow_12", 8.7, 37.0),
+    ("FG_Middle_RackRow_13", 8.7, 37.0), ("FG_Middle_RackRow_14", 8.7, 37.0),
+    ("FG_Middle_RackRowR_1", 11.3, 15.3),
+    ("FG_Bottom_RackRow_1", 8.7, 31.7), ("FG_Bottom_RackRow_2", 8.7, 31.7),
+    ("FG_Bottom_RackRow_3", 8.7, 31.7), ("FG_Bottom_RackRow_4", 8.7, 31.7),
+    ("FG_Bottom_RackRow_5", 8.7, 31.7), ("FG_Bottom_RackRow_6", 8.7, 31.7),
+    ("FG_Bottom_RackRow_7", 8.7, 31.7), ("FG_Bottom_RackRow_8", 8.7, 31.7),
+    ("FG_Bottom_RackRowR_1", 11.3, 15.3),
     ("FG_PalletizingConveyors_1A", 30.1, 2.17),
     ("FG_PalletizingConveyors_1B", 2.17, 2.24),
     ("FG_PalletizingConveyors_2A", 32.19, 2.17),
@@ -332,7 +334,7 @@ while robot.step(timestep) != -1:
     
     if distance_to_waypoint < WAYPOINT_THRESHOLD:
         if not waypoint_reached:
-            print(f"{robot_name} ✓ REACHED WAYPOINT!")
+            print(f"{robot_name} ✓ REACHED WAYPOINT at {aisle_name}, position {position_index}!")
             waypoint_reached = True
         front_right_motor.setVelocity(0.0)
         front_left_motor.setVelocity(0.0)
