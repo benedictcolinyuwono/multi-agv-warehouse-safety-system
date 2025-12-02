@@ -47,11 +47,11 @@ WARNING_DISTANCE = 2.0
 # DWA PARAMETERS
 DWA_DT = 0.3
 DWA_PREDICT_TIME = 1.5
-DWA_V_SAMPLES = 10
+DWA_V_SAMPLES = 8
 DWA_W_SAMPLES = 11
 DWA_ALPHA = 1.5
-DWA_BETA = 2.0
-DWA_GAMMA = 0.8
+DWA_BETA = 2.5
+DWA_GAMMA = 0.3
 
 # WAYPOINT GOALS
 waypoint_goals = {
@@ -138,12 +138,8 @@ def find_node_by_name(supervisor, name):
                 return result
     return None
 
-# DYNAMIC WINDOW APPROACH IMPLEMENTATION
+# DWA: TRAJECTORY PREDICTION
 def predict_trajectory(x, y, theta, v, w, dt, steps):
-    """
-    Differential drive kinematics trajectory prediction.
-    Integrates: dx/dt = v*cos(θ), dy/dt = v*sin(θ), dθ/dt = ω
-    """
     trajectory = [(x, y, theta)]
     for _ in range(steps):
         x += v * math.cos(theta) * dt
@@ -152,11 +148,8 @@ def predict_trajectory(x, y, theta, v, w, dt, steps):
         trajectory.append((x, y, theta))
     return trajectory
 
+# DWA: COLLISION CHECKING
 def check_trajectory_collision(trajectory, obstacles, safety_radius=1.0):
-    """
-    Computes minimum clearance dist(v,ω) along trajectory.
-    Returns negative if collision detected.
-    """
     min_clearance = math.inf
     
     for x, y, _ in trajectory:
@@ -171,12 +164,8 @@ def check_trajectory_collision(trajectory, obstacles, safety_radius=1.0):
     
     return min_clearance
 
+# DWA: HEADING OBJECTIVE
 def heading_objective(trajectory, goal_x, goal_y):
-    """
-    Heading objective: heading(v,ω) = π - |Δθ|
-    Measures alignment between trajectory endpoint and goal direction.
-    Normalized to [0,1] where 1 = perfect alignment.
-    """
     final_x, final_y, final_theta = trajectory[-1]
     
     dx = goal_x - final_x
@@ -190,32 +179,18 @@ def heading_objective(trajectory, goal_x, goal_y):
     
     return (math.pi - angle_diff) / math.pi
 
+# DWA: CLEARANCE OBJECTIVE
 def clearance_objective(clearance, max_clearance=10.0):
-    """
-    Clearance objective: dist(v,ω) normalized.
-    Higher clearance from obstacles is preferred.
-    """
     if clearance < 0:
         return 0.0
     return min(clearance / max_clearance, 1.0)
 
+# DWA: VELOCITY OBJECTIVE
 def velocity_objective(v, max_v):
-    """
-    Velocity objective: velocity(v,ω) = v/v_max.
-    Encourages forward progress toward goal.
-    """
     return v / max_v
 
+# DWA: TRAJECTORY EVALUATION
 def evaluate_trajectory(trajectory, goal_x, goal_y, obstacles, v, max_v, alpha, beta, gamma):
-    """
-    Multi-objective optimization function (Fox et al., 1997):
-    G(v,ω) = α·heading(v,ω) + β·dist(v,ω) + γ·velocity(v,ω)
-    
-    Parameters:
-    - α: goal-seeking weight
-    - β: obstacle avoidance weight  
-    - γ: progress weight
-    """
     clearance = check_trajectory_collision(trajectory, obstacles)
     
     if clearance < 0:
@@ -227,19 +202,11 @@ def evaluate_trajectory(trajectory, goal_x, goal_y, obstacles, v, max_v, alpha, 
     
     return alpha * h_obj + beta * c_obj + gamma * v_obj
 
+# DWA: MAIN ALGORITHM
 def dynamic_window_approach(current_x, current_y, current_theta, current_v, current_w,
                             goal_x, goal_y, obstacles, dt, predict_time,
                             v_samples, w_samples, max_v, max_w, max_accel_v, max_accel_w,
                             alpha, beta, gamma):
-    """
-    Dynamic Window Approach (Fox et al., 1997).
-    
-    Computes admissible velocity space V_a ∩ V_d where:
-    - V_a: velocities within robot limits
-    - V_d: velocities reachable given acceleration constraints (dynamic window)
-    
-    Optimization: arg max G(v,ω) over collision-free trajectories.
-    """
     predict_steps = int(predict_time / dt)
     
     v_min = max(0, current_v - max_accel_v * dt)
@@ -282,6 +249,7 @@ previous_time = 0.0
 current_v = 0.0
 current_w = 0.0
 step_count = 0
+waypoint_reached = False
 
 # MAIN CONTROL LOOP
 while robot.step(timestep) != -1:
@@ -322,7 +290,7 @@ while robot.step(timestep) != -1:
     previous_y = current_y
     previous_time = current_time
     
-    # BUILD OBSTACLE LIST FOR DWA
+    # BUILD OBSTACLE LIST
     obstacles = []
     
     for i in range(1, 16):
@@ -357,7 +325,9 @@ while robot.step(timestep) != -1:
     distance_to_waypoint = math.sqrt(delta_x * delta_x + delta_y * delta_y)
     
     if distance_to_waypoint < WAYPOINT_THRESHOLD:
-        print(f"{robot_name} reached waypoint!")
+        if not waypoint_reached:
+            print(f"{robot_name} ✓ REACHED WAYPOINT!")
+            waypoint_reached = True
         front_right_motor.setVelocity(0.0)
         front_left_motor.setVelocity(0.0)
         back_right_motor.setVelocity(0.0)
@@ -377,7 +347,6 @@ while robot.step(timestep) != -1:
     
     # SAFETY SHIELD OVERRIDE
     min_distance = math.inf
-    closest_obstacle = None
     
     for obs in obstacles:
         dx = obs['x'] - current_x
@@ -389,8 +358,6 @@ while robot.step(timestep) != -1:
     if min_distance < CRITICAL_DISTANCE:
         linear_velocity = 0.0
         angular_velocity = 0.0
-        if step_count % 20 == 0:
-            print(f"{robot_name} [SAFETY OVERRIDE] Stopping at {min_distance:.2f}m")
     elif min_distance < WARNING_DISTANCE:
         safety_factor = (min_distance - CRITICAL_DISTANCE) / (WARNING_DISTANCE - CRITICAL_DISTANCE)
         linear_velocity = dwa_v * safety_factor
@@ -399,7 +366,6 @@ while robot.step(timestep) != -1:
         linear_velocity = dwa_v
         angular_velocity = dwa_w
     
-    # UPDATE VELOCITY STATE
     current_w = angular_velocity
     
     # MOTOR COMMANDS
