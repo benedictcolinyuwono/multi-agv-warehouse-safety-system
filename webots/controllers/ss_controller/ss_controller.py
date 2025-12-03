@@ -10,6 +10,7 @@ from shield.limiter import limit_velocity, limit_angular_velocity
 from shield.supervisor import supervise_commands, PASS, GUARDED, EMERGENCY
 from geometry_utils import closest_point_on_rectangle
 from waypoints import warehouse_waypoints
+from path_planner import get_path_planner
 
 # ROBOT INITIALIZATION
 robot = Supervisor()
@@ -55,29 +56,24 @@ DWA_ALPHA = 1.5
 DWA_BETA = 1.8
 DWA_GAMMA = 1.0
 
-# WAYPOINT GOALS - Assign each AGV a test destination
+# WAYPOINT GOALS
 waypoint_goals = {
-    'AGV_1': ('row_a_aisle_1', 3),      # Row A, Aisle 1, Position 3
-    'AGV_2': ('row_a_aisle_5', 2),      # Row A, Aisle 5, Position 2
-    'AGV_3': ('row_b_aisle_3', 4),      # Row B, Aisle 3, Position 4
-    'AGV_4': ('middle_aisle_7', 5),     # Middle, Aisle 7, Position 5
-    'AGV_5': ('middle_aisle_2', 1),     # Middle, Aisle 2, Position 1
-    'AGV_6': ('bottom_aisle_4', 3),     # Bottom, Aisle 4, Position 3
-    'AGV_7': ('conveyor_1a_pickup', 7), # Conveyor 1A, Position 7
-    'AGV_8': ('conveyor_2a_pickup', 10),# Conveyor 2A, Position 10
-    'AGV_9': ('conveyor_3_pickup', 8),  # Conveyor 3, Position 8
-    'AGV_10': ('row_a_aisle_10', 6),    # Row A, Aisle 10, Position 6
-    'AGV_11': ('row_b_aisle_8', 5),     # Row B, Aisle 8, Position 5
-    'AGV_12': ('middle_aisle_12', 4),   # Middle, Aisle 12, Position 4
-    'AGV_13': ('bottom_aisle_2', 2),    # Bottom, Aisle 2, Position 2
-    'AGV_14': ('row_a_aisle_15', 7),    # Row A, Aisle 15, Position 7
-    'AGV_15': ('bottom_aisle_6', 5),    # Bottom, Aisle 6, Position 5
+    'AGV_1': ('row_a_aisle_1', 3),
+    'AGV_2': ('row_a_aisle_5', 2),
+    'AGV_3': ('row_b_aisle_3', 4),
+    'AGV_4': ('middle_aisle_7', 5),
+    'AGV_5': ('middle_aisle_2', 1),
+    'AGV_6': ('bottom_aisle_4', 3),
+    'AGV_7': ('conveyor_1a_pickup', 7),
+    'AGV_8': ('conveyor_2a_pickup', 10),
+    'AGV_9': ('conveyor_3_pickup', 8),
+    'AGV_10': ('row_a_aisle_10', 6),
+    'AGV_11': ('row_b_aisle_8', 5),
+    'AGV_12': ('middle_aisle_12', 4),
+    'AGV_13': ('bottom_aisle_2', 2),
+    'AGV_14': ('row_a_aisle_15', 6),
+    'AGV_15': ('bottom_aisle_6', 5),
 }
-
-# Get target waypoint for this AGV
-aisle_name, position_index = waypoint_goals[robot_name]
-target_waypoint_x, target_waypoint_y = warehouse_waypoints[aisle_name][position_index]
-print(f"{robot_name} navigating to {aisle_name}, position {position_index}: ({target_waypoint_x:.2f}, {target_waypoint_y:.2f})")
 
 # OBSTACLE DEFINITIONS
 rack_definitions = [
@@ -116,7 +112,6 @@ rack_definitions = [
     ("FG_PalletizingConveyors_3", 32.1, 2.17),
 ]
 
-# NODE SEARCH FUNCTION
 def find_node_by_name(supervisor, name):
     root = supervisor.getRoot()
     children_field = root.getField('children')
@@ -146,7 +141,6 @@ def find_node_by_name(supervisor, name):
                 return result
     return None
 
-# DWA: TRAJECTORY PREDICTION
 def predict_trajectory(x, y, theta, v, w, dt, steps):
     trajectory = [(x, y, theta)]
     for _ in range(steps):
@@ -156,7 +150,6 @@ def predict_trajectory(x, y, theta, v, w, dt, steps):
         trajectory.append((x, y, theta))
     return trajectory
 
-# DWA: COLLISION CHECKING
 def check_trajectory_collision(trajectory, obstacles, safety_radius=1.0):
     min_clearance = math.inf
     
@@ -172,7 +165,6 @@ def check_trajectory_collision(trajectory, obstacles, safety_radius=1.0):
     
     return min_clearance
 
-# DWA: HEADING OBJECTIVE
 def heading_objective(trajectory, goal_x, goal_y):
     final_x, final_y, final_theta = trajectory[-1]
     
@@ -187,17 +179,14 @@ def heading_objective(trajectory, goal_x, goal_y):
     
     return (math.pi - angle_diff) / math.pi
 
-# DWA: CLEARANCE OBJECTIVE
 def clearance_objective(clearance, max_clearance=10.0):
     if clearance < 0:
         return 0.0
     return min(clearance / max_clearance, 1.0)
 
-# DWA: VELOCITY OBJECTIVE
 def velocity_objective(v, max_v):
     return v / max_v
 
-# DWA: TRAJECTORY EVALUATION
 def evaluate_trajectory(trajectory, goal_x, goal_y, obstacles, v, max_v, alpha, beta, gamma):
     clearance = check_trajectory_collision(trajectory, obstacles)
     
@@ -210,7 +199,6 @@ def evaluate_trajectory(trajectory, goal_x, goal_y, obstacles, v, max_v, alpha, 
     
     return alpha * h_obj + beta * c_obj + gamma * v_obj
 
-# DWA: MAIN ALGORITHM
 def dynamic_window_approach(current_x, current_y, current_theta, current_v, current_w,
                             goal_x, goal_y, obstacles, dt, predict_time,
                             v_samples, w_samples, max_v, max_w, max_accel_v, max_accel_w,
@@ -257,7 +245,12 @@ previous_time = 0.0
 current_v = 0.0
 current_w = 0.0
 step_count = 0
-waypoint_reached = False
+
+# PATH PLANNING INITIALIZATION
+path_planner = None
+waypoint_path = None
+current_waypoint_index = 0
+path_initialized = False
 
 # MAIN CONTROL LOOP
 while robot.step(timestep) != -1:
@@ -285,6 +278,24 @@ while robot.step(timestep) != -1:
     compass_values = compass.getValues()
     current_heading = math.atan2(compass_values[1], compass_values[0])
     
+    # PATH PLANNING INITIALIZATION (once position is known)
+    if not path_initialized and previous_x is not None:
+        print(f"{robot_name} initializing path planner...")
+        path_planner = get_path_planner()
+        
+        aisle_name, position_index = waypoint_goals[robot_name]
+        waypoint_path = path_planner.find_path(current_x, current_y, aisle_name, position_index)
+        
+        if waypoint_path:
+            print(f"{robot_name} path found with {len(waypoint_path)} waypoints")
+            print(f"{robot_name} navigating: start → {aisle_name}[{position_index}]")
+            current_waypoint_index = 0
+            path_initialized = True
+        else:
+            print(f"{robot_name} ERROR: No path found!")
+            path_initialized = True
+            waypoint_path = []
+    
     # CALCULATE VELOCITY
     current_time = robot.getTime()
     delta_time = current_time - previous_time
@@ -297,6 +308,17 @@ while robot.step(timestep) != -1:
     previous_x = current_x
     previous_y = current_y
     previous_time = current_time
+    
+    # CHECK IF PATH IS AVAILABLE
+    if not path_initialized or not waypoint_path or current_waypoint_index >= len(waypoint_path):
+        front_right_motor.setVelocity(0.0)
+        front_left_motor.setVelocity(0.0)
+        back_right_motor.setVelocity(0.0)
+        back_left_motor.setVelocity(0.0)
+        continue
+    
+    # GET CURRENT TARGET WAYPOINT
+    target_waypoint_x, target_waypoint_y = waypoint_path[current_waypoint_index]
     
     # BUILD OBSTACLE LIST
     obstacles = []
@@ -333,14 +355,18 @@ while robot.step(timestep) != -1:
     distance_to_waypoint = math.sqrt(delta_x * delta_x + delta_y * delta_y)
     
     if distance_to_waypoint < WAYPOINT_THRESHOLD:
-        if not waypoint_reached:
-            print(f"{robot_name} ✓ REACHED WAYPOINT at {aisle_name}, position {position_index}!")
-            waypoint_reached = True
-        front_right_motor.setVelocity(0.0)
-        front_left_motor.setVelocity(0.0)
-        back_right_motor.setVelocity(0.0)
-        back_left_motor.setVelocity(0.0)
-        continue
+        current_waypoint_index += 1
+        
+        if current_waypoint_index >= len(waypoint_path):
+            print(f"{robot_name} ✓ REACHED FINAL DESTINATION!")
+            front_right_motor.setVelocity(0.0)
+            front_left_motor.setVelocity(0.0)
+            back_right_motor.setVelocity(0.0)
+            back_left_motor.setVelocity(0.0)
+            continue
+        else:
+            print(f"{robot_name} reached waypoint {current_waypoint_index}/{len(waypoint_path)}")
+            target_waypoint_x, target_waypoint_y = waypoint_path[current_waypoint_index]
     
     # ADAPTIVE SPEED SCALING
     if distance_to_waypoint < SLOWDOWN_DISTANCE:
