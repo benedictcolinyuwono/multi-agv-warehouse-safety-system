@@ -1,6 +1,5 @@
 import math
 
-# 1D collision risk functions
 def time_to_collision(ego_x, ego_v, lead_x, lead_v, epsilon=1e-6):
     gap = lead_x - ego_x
     closing_speed = ego_v - lead_v
@@ -29,8 +28,6 @@ def assess_collision_risk(state):
         "violation_predicted": (ttc < CRITICAL_THRESHOLD or headway < CRITICAL_THRESHOLD),
     }
 
-
-# 2D collision risk functions
 def time_to_collision_2d(ego_x, ego_y, ego_vx, ego_vy, other_x, other_y, other_vx=0.0, other_vy=0.0, safety_radius=1.0, epsilon=1e-6):
     delta_x = other_x - ego_x
     delta_y = other_y - ego_y
@@ -49,7 +46,6 @@ def time_to_collision_2d(ego_x, ego_y, ego_vx, ego_vy, other_x, other_y, other_v
     if my_speed < epsilon:
         return math.inf
     
-    # Dot product: project velocity onto gap vector
     closing_speed = (relative_vx * delta_x + relative_vy * delta_y) / max(gap, epsilon)
     
     if closing_speed <= 0.0:

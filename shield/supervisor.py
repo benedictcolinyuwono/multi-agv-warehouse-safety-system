@@ -1,11 +1,9 @@
 from .limiter import limit_velocity
 
-# Mode constants
 PASS = "PASS"
 GUARDED = "GUARDED"
 EMERGENCY = "EMERGENCY"
 
-# Supervisory control function
 def supervise_commands(state, commanded_velocities, risk_assessment):
     v_cmd, w_cmd = commanded_velocities
     

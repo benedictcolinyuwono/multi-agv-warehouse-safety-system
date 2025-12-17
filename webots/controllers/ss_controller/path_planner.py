@@ -1,20 +1,9 @@
-"""
-A* Path Planning for Warehouse Navigation
-Builds waypoint connectivity graph and finds optimal paths
-"""
-
 import math
 from waypoints import warehouse_waypoints
 from obstacles import rack_obstacles, wall_obstacles
 
 class PathPlanner:
     def __init__(self, max_connection_distance=100.0):
-        """
-        Initialize path planner with waypoint network
-        
-        Args:
-            max_connection_distance: Maximum distance to connect waypoints (meters)
-        """
         self.waypoints = warehouse_waypoints
         self.graph = {}
         self.max_connection_distance = max_connection_distance
@@ -24,7 +13,6 @@ class PathPlanner:
         self._build_graph()
     
     def _load_obstacles(self):
-        """Load rack and wall obstacle definitions"""
         for rack_data in rack_obstacles:
             name, center_x, center_y, width, length = rack_data
             self.rack_obstacles.append({
@@ -46,7 +34,6 @@ class PathPlanner:
             })
     
     def _line_too_close_to_obstacle(self, x1, y1, x2, y2, clearance=0.5):
-        """Check if line segment gets too close to any rack or wall"""
         for rack in self.rack_obstacles:
             if self._line_too_close_to_rectangle(x1, y1, x2, y2, 
                                                  rack['x'], rack['y'], 
@@ -64,7 +51,6 @@ class PathPlanner:
         return False
     
     def _line_too_close_to_rectangle(self, x1, y1, x2, y2, rect_x, rect_y, rect_width, rect_length, clearance):
-        """Check if line segment gets within clearance distance of rectangle"""
         half_w = rect_width / 2.0 + clearance
         half_l = rect_length / 2.0 + clearance
         
@@ -85,7 +71,6 @@ class PathPlanner:
         return False
     
     def _build_graph(self):
-        """Build connectivity graph between waypoints with collision checking"""
         self.waypoint_list = []
         self.waypoint_coords = {}
         
@@ -111,23 +96,11 @@ class PathPlanner:
                         self.graph[wp1_id].append((wp2_id, distance))
     
     def _heuristic(self, wp_id, goal_id):
-        """A* heuristic: Euclidean distance to goal"""
         x1, y1 = self.waypoint_coords[wp_id]
         x2, y2 = self.waypoint_coords[goal_id]
         return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
     
     def find_path(self, start_x, start_y, goal_aisle, goal_position):
-        """
-        Find optimal path from start position to goal waypoint using A*
-        
-        Args:
-            start_x, start_y: Starting position
-            goal_aisle: Target aisle name (e.g., 'row_a_aisle_1')
-            goal_position: Position index in aisle (e.g., 3)
-        
-        Returns:
-            List of (x, y) coordinates representing path
-        """
         goal_wp_id = f"{goal_aisle}_{goal_position}"
         
         if goal_wp_id not in self.waypoint_coords:
@@ -135,8 +108,7 @@ class PathPlanner:
             return None
         
         goal_coords = self.waypoint_coords[goal_wp_id]
-        
-        # Find nearest waypoint that's in the direction of the goal
+
         start_wp_id = self._find_nearest_waypoint_toward_goal(start_x, start_y, goal_coords[0], goal_coords[1])
         start_coords = self.waypoint_coords[start_wp_id]
         
@@ -173,7 +145,6 @@ class PathPlanner:
         return None
     
     def _find_nearest_waypoint_toward_goal(self, x, y, goal_x, goal_y):
-        """Find closest waypoint that's generally in the direction of the goal"""
         # Calculate direction vector to goal
         dx_to_goal = goal_x - x
         dy_to_goal = goal_y - y
@@ -216,7 +187,6 @@ class PathPlanner:
         return best_waypoint
     
     def _find_nearest_waypoint(self, x, y):
-        """Find closest waypoint to given position (fallback method)"""
         min_dist = math.inf
         nearest = None
         
@@ -229,7 +199,6 @@ class PathPlanner:
         return nearest
     
     def _reconstruct_path(self, came_from, current):
-        """Reconstruct path from A* search"""
         path = [self.waypoint_coords[current]]
         
         while current in came_from:
@@ -243,7 +212,6 @@ class PathPlanner:
 path_planner = None
 
 def get_path_planner():
-    """Get or create global path planner instance"""
     global path_planner
     if path_planner is None:
         path_planner = PathPlanner(max_connection_distance=100.0)

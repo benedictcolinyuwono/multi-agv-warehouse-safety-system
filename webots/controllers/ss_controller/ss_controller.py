@@ -5,7 +5,6 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
-# Advanced navigation imports (for A* and DWA)
 from shield.risk import assess_collision_risk_2d
 from shield.limiter import limit_velocity, limit_angular_velocity
 from shield.supervisor import supervise_commands, PASS, GUARDED, EMERGENCY
@@ -14,12 +13,10 @@ from waypoints import warehouse_waypoints
 from path_planner import get_path_planner
 from obstacles import rack_obstacles, wall_obstacles
 
-# ROBOT INITIALIZATION
 robot = Supervisor()
 timestep = int(robot.getBasicTimeStep())
 robot_name = robot.getName()
 
-# MOTOR SETUP
 front_right_motor = robot.getDevice('front_right_wheel_joint')
 front_left_motor = robot.getDevice('front_left_wheel_joint')
 back_right_motor = robot.getDevice('back_right_wheel_joint')
@@ -30,13 +27,11 @@ front_left_motor.setPosition(float('inf'))
 back_right_motor.setPosition(float('inf'))
 back_left_motor.setPosition(float('inf'))
 
-# SENSOR SETUP
 gps = robot.getDevice('gps')
 gps.enable(timestep)
 compass = robot.getDevice('compass')
 compass.enable(timestep)
 
-# NAVIGATION CONSTANTS
 BASE_SPEED = 1.5
 WHEEL_RADIUS = 0.125
 WAYPOINT_THRESHOLD = 0.5
@@ -45,16 +40,13 @@ MAX_LINEAR_ACCEL = 2.0
 MAX_ANGULAR_ACCEL = 3.0
 MAX_ANGULAR_VELOCITY = 2.0
 
-# ROTATION CONSTANTS
 ROTATION_THRESHOLD = 0.4   # 23 degrees
 ROTATION_TOLERANCE = 0.0001  # ~1.1 degrees (very tight tolerance)
 ROTATION_SPEED = 2.0       # rad/s (increased from 1.2)
 
-# SAFETY CONSTANTS
 CRITICAL_DISTANCE = 1.0
 WARNING_DISTANCE = 2.0
 
-# DWA PARAMETERS
 DWA_DT = 0.3
 DWA_PREDICT_TIME = 1.0
 DWA_V_SAMPLES = 10
@@ -63,7 +55,6 @@ DWA_ALPHA = 1.5
 DWA_BETA = 1.8
 DWA_GAMMA = 1.0
 
-# WAYPOINT GOALS
 waypoint_goals = {
     'AGV_1': ('row_a_aisle_1', 3),
     'AGV_2': ('row_a_aisle_5', 2),
@@ -112,7 +103,6 @@ def find_node_by_name(supervisor, name):
     return None
 
 def normalize_angle(angle):
-    """Normalize angle to [-pi, pi]"""
     while angle > math.pi:
         angle -= 2.0 * math.pi
     while angle < -math.pi:
@@ -120,10 +110,6 @@ def normalize_angle(angle):
     return angle
 
 def rotate_to_angle(target_angle, tolerance=0.15, timeout=15.0):
-    """
-    Blocking function: rotate in place until aligned with target angle
-    Returns when angle difference < tolerance or timeout
-    """
     start_time = robot.getTime()
     consecutive_aligned_count = 0
     required_aligned_steps = 3
@@ -165,9 +151,6 @@ def rotate_to_angle(target_angle, tolerance=0.15, timeout=15.0):
         else:
             angular_velocity = -rotation_speed
 
-        # DIFFERENTIAL DRIVE ROTATION (in-place)
-        # CCW rotation: left forward, right backward
-        # CW rotation: left backward, right forward
         front_left_motor.setVelocity(angular_velocity)
         back_left_motor.setVelocity(angular_velocity)
         front_right_motor.setVelocity(-angular_velocity)
@@ -270,7 +253,6 @@ def dynamic_window_approach(current_x, current_y, current_theta, current_v, curr
     
     return best_v, best_w, best_score
 
-# STATE INITIALIZATION
 rack_nodes_cache = {}
 wall_static_cache = {}
 racks_initialized = False
@@ -282,17 +264,14 @@ current_v = 0.0
 current_w = 0.0
 step_count = 0
 
-# PATH PLANNING INITIALIZATION
 path_planner = None
 waypoint_path = None
 current_waypoint_index = 0
 path_initialized = False
 
-# MAIN CONTROL LOOP
 while robot.step(timestep) != -1:
     step_count += 1
-    
-    # RACK NODE INITIALIZATION
+
     if not racks_initialized:
         for rack_data in rack_obstacles:
             rack_name, _, _, rack_width, rack_length = rack_data
@@ -304,8 +283,7 @@ while robot.step(timestep) != -1:
                     'length': rack_length
                 }
         racks_initialized = True
-    
-    # WALL STATIC INITIALIZATION
+
     if not walls_initialized:
         for wall_data in wall_obstacles:
             wall_name, wall_x, wall_y, wall_width, wall_length = wall_data
@@ -316,8 +294,7 @@ while robot.step(timestep) != -1:
                 'length': wall_length
             }
         walls_initialized = True
-    
-    # READ CURRENT STATE
+
     gps_values = gps.getValues()
     current_x = gps_values[0]
     current_y = gps_values[1]
@@ -325,7 +302,6 @@ while robot.step(timestep) != -1:
     compass_values = compass.getValues()
     current_heading = math.atan2(compass_values[1], compass_values[0])
     
-    # A* PATH PLANNING INITIALIZATION
     if not path_initialized and previous_x is not None:
         path_planner = get_path_planner()
 
@@ -342,7 +318,6 @@ while robot.step(timestep) != -1:
             path_initialized = True
             waypoint_path = []
     
-    # CALCULATE VELOCITY
     current_time = robot.getTime()
     delta_time = current_time - previous_time
     
@@ -355,7 +330,6 @@ while robot.step(timestep) != -1:
     previous_y = current_y
     previous_time = current_time
     
-    # Check if path is valid
     if not path_initialized or not waypoint_path or current_waypoint_index >= len(waypoint_path):
         front_right_motor.setVelocity(0.0)
         front_left_motor.setVelocity(0.0)
@@ -363,7 +337,6 @@ while robot.step(timestep) != -1:
         back_left_motor.setVelocity(0.0)
         continue
 
-    # WAYPOINT NAVIGATION
     target_waypoint_x, target_waypoint_y = waypoint_path[current_waypoint_index]
     delta_x = target_waypoint_x - current_x
     delta_y = target_waypoint_y - current_y
@@ -371,7 +344,6 @@ while robot.step(timestep) != -1:
     angle_to_waypoint = math.atan2(delta_y, delta_x)
     angle_diff = normalize_angle(angle_to_waypoint - current_heading)
 
-    # Check if reached waypoint
     if distance_to_waypoint < WAYPOINT_THRESHOLD:
         current_waypoint_index += 1
         if current_waypoint_index >= len(waypoint_path):
@@ -383,9 +355,7 @@ while robot.step(timestep) != -1:
             back_right_motor.setVelocity(0.0)
             continue
 
-    # Handle rotation if needed (using non-blocking differential drive)
     if abs(angle_diff) > ROTATION_THRESHOLD:
-        # Rotate in place using differential drive
         if angle_diff > 0:
             angular_velocity = ROTATION_SPEED
         else:
@@ -397,10 +367,8 @@ while robot.step(timestep) != -1:
         back_right_motor.setVelocity(-angular_velocity)
         continue
 
-    # OBSTACLE DETECTION FOR DWA
     obstacles = []
 
-    # Detect other AGVs
     for i in range(1, 16):
         agv_name = f"AGV_{i}"
         if agv_name == robot_name:
@@ -410,7 +378,6 @@ while robot.step(timestep) != -1:
             position = agv_node.getPosition()
             obstacles.append({'x': position[0], 'y': position[1]})
 
-    # Detect racks
     for rack_name, rack_data in rack_nodes_cache.items():
         rack_node = rack_data['node']
         rack_position = rack_node.getPosition()
@@ -424,7 +391,6 @@ while robot.step(timestep) != -1:
         )
         obstacles.append({'x': closest_x, 'y': closest_y})
 
-    # Detect walls
     for wall_name, wall_data in wall_static_cache.items():
         closest_x, closest_y = closest_point_on_rectangle(
             current_x, current_y,
@@ -433,17 +399,13 @@ while robot.step(timestep) != -1:
             0.0
         )
         obstacles.append({'x': closest_x, 'y': closest_y})
-    
-    
-    # DWA NAVIGATION WITH OBSTACLE AVOIDANCE
-    # Adaptive speed based on distance to waypoint
+
     if distance_to_waypoint < SLOWDOWN_DISTANCE:
         speed_scale = distance_to_waypoint / SLOWDOWN_DISTANCE
         adaptive_max_speed = BASE_SPEED * max(speed_scale, 0.5)
     else:
         adaptive_max_speed = BASE_SPEED
 
-    # Run DWA to get optimal velocity commands
     dwa_v, dwa_w, dwa_score = dynamic_window_approach(
         current_x, current_y, current_heading, current_v, current_w,
         target_waypoint_x, target_waypoint_y, obstacles,
@@ -454,7 +416,6 @@ while robot.step(timestep) != -1:
         DWA_ALPHA, DWA_BETA, DWA_GAMMA
     )
 
-    # Find minimum distance to any obstacle
     min_distance = math.inf
     for obs in obstacles:
         dx = obs['x'] - current_x
@@ -463,7 +424,6 @@ while robot.step(timestep) != -1:
         if dist < min_distance:
             min_distance = dist
 
-    # Apply safety checks
     if min_distance < CRITICAL_DISTANCE:
         linear_velocity = 0.0
         angular_velocity = 0.0
@@ -475,15 +435,12 @@ while robot.step(timestep) != -1:
         linear_velocity = dwa_v
         angular_velocity = dwa_w
 
-    # Update current angular velocity for next iteration
     current_w = angular_velocity
 
-    # Convert to wheel velocities (differential drive with DWA angular velocity)
     wheel_velocity = linear_velocity / WHEEL_RADIUS
     left_velocity = wheel_velocity - angular_velocity
     right_velocity = wheel_velocity + angular_velocity
 
-    # Set motor velocities
     front_left_motor.setVelocity(left_velocity)
     back_left_motor.setVelocity(left_velocity)
     front_right_motor.setVelocity(right_velocity)

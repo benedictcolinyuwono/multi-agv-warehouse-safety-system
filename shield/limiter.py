@@ -1,4 +1,3 @@
-# Velocity limiting functions
 def limit_velocity(v_cmd, ttc_s, headway_s, v_max):
     CRITICAL_THRESHOLD = 1.0
     WARNING_THRESHOLD = 2.0
