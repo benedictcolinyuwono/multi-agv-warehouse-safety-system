@@ -17,6 +17,6 @@ def supervise_commands(state, commanded_velocities, risk_assessment):
             risk_assessment["headway"],
             state["v_cap"]
         )
-        return GUARDED, (v_safe, w_cmd)
+        return GUARDED, (v_safe, 0.0)
 
     return PASS, (v_cmd, w_cmd)

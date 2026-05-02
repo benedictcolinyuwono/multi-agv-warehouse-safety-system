@@ -56,21 +56,7 @@ DWA_BETA = 1.8
 DWA_GAMMA = 1.0
 
 waypoint_goals = {
-    'AGV_1': ('row_a_aisle_1', 3),
-    'AGV_2': ('row_a_aisle_5', 2),
-    'AGV_3': ('row_b_aisle_3', 4),
-    'AGV_4': ('middle_aisle_7', 5),
-    'AGV_5': ('middle_aisle_2', 1),
-    'AGV_6': ('bottom_aisle_4', 3),
-    'AGV_7': ('conveyor_1a_pickup', 7),
-    'AGV_8': ('conveyor_2a_pickup', 10),
-    'AGV_9': ('conveyor_3_pickup', 8),
-    'AGV_10': ('row_a_aisle_10', 6),
-    'AGV_11': ('row_b_aisle_8', 5),
-    'AGV_12': ('middle_aisle_12', 4),
-    'AGV_13': ('bottom_aisle_2', 2),
-    'AGV_14': ('row_a_aisle_15', 6),
-    'AGV_15': ('bottom_aisle_6', 5),
+    'AGV_1': ('row_a_aisle_1', 3)
 }
 
 def find_node_by_name(supervisor, name):

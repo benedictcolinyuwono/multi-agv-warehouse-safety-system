@@ -7,8 +7,8 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/project
 WorldInfo {
 }
 Viewpoint {
-  orientation -0.5773502691896258 0.5773502691896258 0.5773502691896258 2.0944
-  position 1.9373938568472648 -8.402925331128976 398.3714102027156
+  orientation -0.574813250425146 0.5757050441037037 0.5815096124134415 2.0896023810499798
+  position -36.716594440425986 55.490627566503676 176.9488127898846
 }
 TexturedBackground {
   texture "noon_sunny_empty"
@@ -1454,109 +1454,81 @@ DEF FG_PalletizingConveyors Group {
 }
 DEF AGV Group {
   children [
-    SummitXlSteel {
-      translation 4.8882 41.1513 0.192922
+    DEF AGV_1 SummitXlSteel {
+      translation -103.86 83.45 0.195
+      rotation 0 0 -1 -5.307179586466759e-06
       name "AGV_1"
-      controller "ss_controller"
+      controller "baseline_controller"
       supervisor TRUE
     }
-    SummitXlSteel {
-      translation 5.01731 36.6408 0.192922
-      rotation 0 0 1 3.14159
+    DEF AGV_2 SummitXlSteel {
+      translation -103.86 81.55 0.195
+      rotation 0 0 1 1.5708
       name "AGV_2"
-      controller "ss_controller"
+      controller "baseline_controller"
       supervisor TRUE
     }
-    SummitXlSteel {
-      translation 7.85625 -0.16004 0.19342
-      rotation 0 0 1 3.14159
+    DEF AGV_3 SummitXlSteel {
+      translation -103.86 76.54 0.195
+      rotation 0 0 1 1.5708
       name "AGV_3"
-      controller "ss_controller"
+      controller "baseline_controller"
       supervisor TRUE
     }
-    SummitXlSteel {
-      translation 15.6309 -78.3408 0.193336
+    DEF AGV_4 SummitXlSteel {
+      translation -103.86 71.52 0.195
       rotation 0 0 1 1.5708
       name "AGV_4"
-      controller "ss_controller"
+      controller "baseline_controller"
       supervisor TRUE
     }
-    SummitXlSteel {
-      translation 30.0388 -78.3938 0.192922
+    DEF AGV_5 SummitXlSteel {
+      translation -103.86 66.51 0.195
       rotation 0 0 1 1.5708
       name "AGV_5"
-      controller "ss_controller"
+      controller "baseline_controller"
       supervisor TRUE
     }
-    SummitXlSteel {
-      translation 45.5807 -78.2514 0.192922
+    DEF AGV_6 SummitXlSteel {
+      translation -103.86 61.49 0.195
       rotation 0 0 1 1.5708
       name "AGV_6"
-      controller "ss_controller"
+      controller "<none>"
       supervisor TRUE
     }
-    SummitXlSteel {
-      translation 64.1366 -78.0355 0.192922
-      rotation 0 0 1 1.5708
+    DEF AGV_7 SummitXlSteel {
+      translation -98.56 44.55 0.195
+      rotation 0 0 1 -3.1415853071795863
       name "AGV_7"
-      controller "ss_controller"
+      controller "<none>"
       supervisor TRUE
     }
-    SummitXlSteel {
-      translation 87.085 -78.0542 0.192922
-      rotation 0 0 1 1.5708
+    DEF AGV_8 SummitXlSteel {
+      translation -93.26 46.45 0.195
+      rotation 0 0 -1 1.57079
       name "AGV_8"
-      controller "ss_controller"
-      supervisor TRUE
-    }
-    SummitXlSteel {
-      translation 87.5883 -4.51718 0.192922
-      rotation 0 0 1 -1.5707953071795862
-      name "AGV_9"
-      controller "ss_controller"
-      supervisor TRUE
-    }
-    SummitXlSteel {
-      translation 8.38145 -42.5126 0.192922
-      rotation 0.0004260046611427802 0.00226009891513537 0.9999973552329637 0
-      name "AGV_10"
-      controller "ss_controller"
-      supervisor TRUE
-    }
-    SummitXlSteel {
-      translation 7.8923 -46.7846 0.192922
-      rotation 0 0 1 3.14159
-      name "AGV_11"
-      controller "ss_controller"
-      supervisor TRUE
-    }
-    SummitXlSteel {
-      translation -72.8801 -2.5992 0.192922
-      rotation 0 0 1 1.5708
-      name "AGV_12"
-      controller "ss_controller"
-      supervisor TRUE
-    }
-    SummitXlSteel {
-      translation -80.83 -2.1689 0.192922
-      rotation 0 0 1 -1.5707953071795862
-      name "AGV_13"
-      controller "ss_controller"
-      supervisor TRUE
-    }
-    SummitXlSteel {
-      translation 63.128 37.0974 -0.104376
-      rotation 0 0 1 1.5708
-      name "AGV_14"
-      controller "ss_controller"
-      supervisor TRUE
-    }
-    SummitXlSteel {
-      translation -98.045 -56.7479 0.194386
-      rotation 0 0 1 1.5708
-      name "AGV_15"
-      controller "ss_controller"
+      controller "<none>"
       supervisor TRUE
     }
   ]
+}
+Solid {
+  translation 58.26 83.45 5.425
+  rotation 0 0 1 -3.1415853071795863
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.85 0.55 0.15
+        roughness 0.6
+        metalness 0.3
+      }
+      geometry Box {
+        size 0.978 0.776 0.51
+      }
+    }
+  ]
+  name "Robot Substitute"
+  boundingObject Box {
+    size 0.978 0.776 0.51
+  }
 }
