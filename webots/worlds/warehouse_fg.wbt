@@ -7,8 +7,8 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/project
 WorldInfo {
 }
 Viewpoint {
-  orientation -0.574813250425146 0.5757050441037037 0.5815096124134415 2.0896023810499798
-  position -36.716594440425986 55.490627566503676 176.9488127898846
+  orientation -0.5691862347925989 0.5722345163545467 0.5904021412690696 2.0730555457039945
+  position -20.925047559169993 22.874622224852644 217.89528647339796
 }
 TexturedBackground {
   texture "noon_sunny_empty"
@@ -1493,27 +1493,111 @@ DEF AGV Group {
       translation -103.86 61.49 0.195
       rotation 0 0 1 1.5708
       name "AGV_6"
-      controller "<none>"
+      controller "baseline_controller"
       supervisor TRUE
     }
     DEF AGV_7 SummitXlSteel {
-      translation -98.56 44.55 0.195
-      rotation 0 0 1 -3.1415853071795863
+      translation -103.86 56.48 0.195
+      rotation 0 0 1 1.5708
       name "AGV_7"
-      controller "<none>"
+      controller "baseline_controller"
       supervisor TRUE
     }
     DEF AGV_8 SummitXlSteel {
-      translation -93.26 46.45 0.195
-      rotation 0 0 -1 1.57079
+      translation -103.86 51.46 0.195
+      rotation 0 0 1 1.5708
       name "AGV_8"
-      controller "<none>"
+      controller "baseline_controller"
+      supervisor TRUE
+    }
+    DEF AGV_9 SummitXlSteel {
+      translation -103.86 46.45 0.195
+      rotation 0 0 1 1.5708
+      name "AGV_9"
+      controller "baseline_controller"
+      supervisor TRUE
+    }
+    DEF AGV_10 SummitXlSteel {
+      translation -103.86 44.55 0.195
+      rotation 0 0 1 1.5708
+      name "AGV_10"
+      controller "baseline_controller"
+      supervisor TRUE
+    }
+    DEF AGV_11 SummitXlSteel {
+      translation -98.56 44.55 0.195
+      rotation 0 0 1 -3.1415853071795863
+      name "AGV_11"
+      controller "baseline_controller"
+      supervisor TRUE
+    }
+    DEF AGV_12 SummitXlSteel {
+      translation -87.96 44.55 0.195
+      rotation 0 0 1 -3.1415853071795863
+      name "AGV_12"
+      controller "baseline_controller"
+      supervisor TRUE
+    }
+    DEF AGV_13 SummitXlSteel {
+      translation -77.36 44.55 0.195
+      rotation 0 0 1 -3.1415853071795863
+      name "AGV_13"
+      controller "baseline_controller"
+      supervisor TRUE
+    }
+    DEF AGV_14 SummitXlSteel {
+      translation -66.76 44.55 0.195
+      rotation 0 0 1 -3.1415853071795863
+      name "AGV_14"
+      controller "baseline_controller"
+      supervisor TRUE
+    }
+    DEF AGV_15 SummitXlSteel {
+      translation -56.16 44.55 0.195
+      rotation 0 0 1 -3.1415853071795863
+      name "AGV_15"
+      controller "baseline_controller"
+      supervisor TRUE
+    }
+    DEF AGV_16 SummitXlSteel {
+      translation -45.56 44.55 0.195
+      rotation 0 0 1 -3.1415853071795863
+      name "AGV_16"
+      controller "baseline_controller"
+      supervisor TRUE
+    }
+    DEF AGV_17 SummitXlSteel {
+      translation -34.96 44.55 0.195
+      rotation 0 0 1 -3.1415853071795863
+      name "AGV_17"
+      controller "baseline_controller"
+      supervisor TRUE
+    }
+    DEF AGV_18 SummitXlSteel {
+      translation -24.36 44.55 0.195
+      rotation 0 0 1 -3.1415853071795863
+      name "AGV_18"
+      controller "baseline_controller"
+      supervisor TRUE
+    }
+    DEF AGV_19 SummitXlSteel {
+      translation -13.76 44.55 0.195
+      rotation 0 0 1 -3.1415853071795863
+      name "AGV_19"
+      controller "baseline_controller"
+      supervisor TRUE
+    }
+    DEF AGV_20 SummitXlSteel {
+      translation -3.16 44.55 0.195
+      rotation 0 0 1 -3.1415853071795863
+      name "AGV_20"
+      controller "baseline_controller"
       supervisor TRUE
     }
   ]
 }
 Solid {
-  translation 58.26 83.45 5.425
+  translation -68.7299 17.13 5.425
   rotation 0 0 1 -3.1415853071795863
   children [
     Shape {

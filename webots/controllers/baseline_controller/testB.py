@@ -66,7 +66,7 @@ GO_TO_TARGET = "GO_TO_TARGET"
 RETURN_HOME = "RETURN_HOME"
 DWELL = "DWELL"
 
-EXPERIMENT_DURATION = 3600.0  # seconds
+EXPERIMENT_DURATION = 3600.0  # use 300.0 for quick tests, 3600.0 for final experiments
 
 VALID_TASKS = []
 for aisle_num in range(2, 18):

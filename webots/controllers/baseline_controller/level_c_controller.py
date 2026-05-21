@@ -4,7 +4,6 @@ import random
 import sys
 from pathlib import Path
 
-# Add repo root to Python path so we can import shield/ modules
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.append(str(REPO_ROOT))
@@ -13,6 +12,7 @@ from waypoints import warehouse_waypoints
 from path_planner import get_path_planner
 from shield.risk import assess_collision_risk_2d
 from shield.supervisor import supervise_commands
+from experiment_logger import ExperimentLogger
 
 robot = Supervisor()
 timestep = int(robot.getBasicTimeStep())
@@ -62,14 +62,14 @@ TOP_TURN_WAIT_THRESHOLD = 1.0
 BOTTOM_WAIT_IGNORE_THRESHOLD = 4.3
 TOP_QUEUE_IGNORE_THRESHOLD = 4.3
 
-# Level C shield settings
+# Level C bottom-corridor rule thresholds.
+# The hard-yield rule only checks the aisle exit.
+# Once the exiting AGV reaches bottom turn, Safety Shield manages dynamic spacing.
+BOTTOM_CORRIDOR_YIELD_WAIT_THRESHOLD = 1.8
+AISLE_EXIT_REQUEST_THRESHOLD = 3.2
+
 SHIELD_SAFETY_RADIUS = 0.5
 SHIELD_NEIGHBOR_RADIUS = 5.0
-SHIELD_MODE_LOG_EVERY = 20
-
-# Bottom merge-yield settings
-AISLE_EXIT_REQUEST_THRESHOLD = 2.5
-BOTTOM_MERGE_YIELD_THRESHOLD = 2.5
 
 HOME_GROUP = "row_a_aisle_1_top_turn"
 HOME_INDEX = 0
@@ -78,12 +78,14 @@ GO_TO_TARGET = "GO_TO_TARGET"
 RETURN_HOME = "RETURN_HOME"
 DWELL = "DWELL"
 
+EXPERIMENT_DURATION = 3600.0  # use 300.0 for quick tests
+
 VALID_TASKS = []
 for aisle_num in range(2, 18):
     for wp_idx in range(1, 7):
         VALID_TASKS.append((f"row_a_aisle_{aisle_num}", wp_idx))
 
-AGV_DEF_NAMES = [f"AGV_{i}" for i in range(1, 9)]
+AGV_DEF_NAMES = [f"AGV_{i}" for i in range(1, 21)]
 
 
 def normalize_angle(angle):
@@ -102,11 +104,10 @@ def stop_motors():
 
 
 def pick_next_task(previous_task=None):
-    return ("row_a_aisle_3", 2)
-    # candidates = VALID_TASKS[:]
-    # if previous_task in candidates and len(candidates) > 1:
-    #     candidates.remove(previous_task)
-    # return random.choice(candidates)
+    candidates = VALID_TASKS[:]
+    if previous_task in candidates and len(candidates) > 1:
+        candidates.remove(previous_task)
+    return random.choice(candidates)
 
 
 def get_other_agv_positions():
@@ -131,9 +132,7 @@ def get_other_agv_positions():
 
 
 def point_is_occupied_by_other_agv(target_x, target_y, threshold=QUEUE_OCCUPANCY_THRESHOLD):
-    others = get_other_agv_positions()
-
-    for other_name, ox, oy in others:
+    for other_name, ox, oy in get_other_agv_positions():
         d = math.hypot(ox - target_x, oy - target_y)
         if d < threshold:
             return True, other_name
@@ -141,11 +140,17 @@ def point_is_occupied_by_other_agv(target_x, target_y, threshold=QUEUE_OCCUPANCY
     return False, None
 
 
+def is_home_target(target_x, target_y, threshold=0.5):
+    home_x_local, home_y_local = warehouse_waypoints[HOME_GROUP][HOME_INDEX]
+    return math.hypot(target_x - home_x_local, target_y - home_y_local) < threshold
+
+
 def is_aisle_1_queue_or_home_target(target_x, target_y):
     aisle1_points = warehouse_waypoints["row_a_aisle_1"]
     home_point = warehouse_waypoints["row_a_aisle_1_top_turn"][0]
+    bottom_turn_point = warehouse_waypoints["row_a_aisle_1_bottom_turn"][0]
 
-    all_queue_points = aisle1_points + [home_point]
+    all_queue_points = aisle1_points + [home_point, bottom_turn_point]
 
     for px, py in all_queue_points:
         if math.hypot(target_x - px, target_y - py) < 0.5:
@@ -154,9 +159,24 @@ def is_aisle_1_queue_or_home_target(target_x, target_y):
     return False
 
 
-def is_home_target(target_x, target_y, threshold=0.5):
-    home_x, home_y = warehouse_waypoints[HOME_GROUP][HOME_INDEX]
-    return math.hypot(target_x - home_x, target_y - home_y) < threshold
+def is_bottom_queue_target(target_x, target_y):
+    for aisle_num in range(1, 18):
+        aisle_name = f"row_a_aisle_{aisle_num}"
+
+        bottom_turn_key = f"{aisle_name}_bottom_turn"
+        bottom_wait_key = f"{aisle_name}_bottom_wait"
+
+        if bottom_turn_key in warehouse_waypoints:
+            bx, by = warehouse_waypoints[bottom_turn_key][0]
+            if math.hypot(target_x - bx, target_y - by) < 1.0:
+                return True, aisle_name, "bottom_turn"
+
+        if bottom_wait_key in warehouse_waypoints:
+            wx, wy = warehouse_waypoints[bottom_wait_key][0]
+            if math.hypot(target_x - wx, target_y - wy) < 1.0:
+                return True, aisle_name, "bottom_wait"
+
+    return False, None, None
 
 
 def get_task_aisle_name_from_task(task):
@@ -192,6 +212,11 @@ def get_top_turn_point_for_aisle(aisle_name):
 def is_other_agv_at_bottom_wait_of_aisle(other_x, other_y, aisle_name, threshold=BOTTOM_WAIT_IGNORE_THRESHOLD):
     bwx, bwy = get_bottom_wait_point_for_aisle(aisle_name)
     return math.hypot(other_x - bwx, other_y - bwy) < threshold
+
+
+def is_other_agv_at_bottom_turn_of_aisle(other_x, other_y, aisle_name, threshold=1.2):
+    btx, bty = get_bottom_turn_point_for_aisle(aisle_name)
+    return math.hypot(other_x - btx, other_y - bty) < threshold
 
 
 def is_other_agv_at_top_wait_of_aisle(other_x, other_y, aisle_name, threshold=TOP_QUEUE_IGNORE_THRESHOLD):
@@ -235,19 +260,73 @@ def other_agv_occupies_bottom_turn(aisle_name, threshold=AISLE_OCCUPANCY_THRESHO
     return False, None
 
 
-def is_top_queue_target(target_x, target_y):
+def get_bottom_wait_aisle_index(aisle_name):
+    return int(aisle_name.split("_")[-1])
+
+
+def get_next_left_aisle_name(aisle_name):
+    idx = get_bottom_wait_aisle_index(aisle_name)
+
+    if idx <= 2:
+        return None
+
+    return f"row_a_aisle_{idx - 1}"
+
+
+def get_next_left_bottom_target(aisle_name):
+    idx = get_bottom_wait_aisle_index(aisle_name)
+
+    if idx == 2:
+        return warehouse_waypoints["row_a_aisle_1_bottom_turn"][0]
+
+    next_aisle_name = f"row_a_aisle_{idx - 1}"
+    return warehouse_waypoints[f"{next_aisle_name}_bottom_wait"][0]
+
+
+def get_nearest_bottom_wait_aisle(current_x, current_y, threshold=BOTTOM_CORRIDOR_YIELD_WAIT_THRESHOLD):
+    nearest_aisle = None
+    nearest_distance = None
+
     for aisle_num in range(2, 18):
         aisle_name = f"row_a_aisle_{aisle_num}"
-        top_wait = get_top_wait_point_for_aisle(aisle_name)
-        top_turn = get_top_turn_point_for_aisle(aisle_name)
+        bottom_wait_key = f"{aisle_name}_bottom_wait"
 
-        if math.hypot(target_x - top_wait[0], target_y - top_wait[1]) < 1.0:
-            return True, aisle_name
+        if bottom_wait_key not in warehouse_waypoints:
+            continue
 
-        if math.hypot(target_x - top_turn[0], target_y - top_turn[1]) < 1.0:
-            return True, aisle_name
+        bwx, bwy = warehouse_waypoints[bottom_wait_key][0]
+        d = math.hypot(current_x - bwx, current_y - bwy)
+
+        if d < threshold:
+            if nearest_distance is None or d < nearest_distance:
+                nearest_distance = d
+                nearest_aisle = aisle_name
+
+    return nearest_aisle, nearest_distance
+
+
+def other_agv_near_aisle_exit_only(aisle_name, threshold=AISLE_EXIT_REQUEST_THRESHOLD):
+    aisle_points = warehouse_waypoints[aisle_name]
+    exit_x, exit_y = aisle_points[-1]
+
+    for other_name, ox, oy in get_other_agv_positions():
+        # Once the AGV has reached bottom wait, it has joined the bottom-corridor queue.
+        if is_other_agv_at_bottom_wait_of_aisle(ox, oy, aisle_name):
+            continue
+
+        # Once the AGV reaches bottom turn, the hard yield rule releases.
+        # From this point, Safety Shield handles local dynamic spacing.
+        if is_other_agv_at_bottom_turn_of_aisle(ox, oy, aisle_name):
+            continue
+
+        if math.hypot(ox - exit_x, oy - exit_y) < threshold:
+            return True, other_name
 
     return False, None
+
+
+def is_near_point(current_x, current_y, point_x, point_y, threshold=1.5):
+    return math.hypot(current_x - point_x, current_y - point_y) < threshold
 
 
 def estimate_ego_velocity_components(linear_velocity, heading_rad):
@@ -265,6 +344,18 @@ def get_most_critical_risk(current_x, current_y, ego_vx, ego_vy):
 
         if gap > SHIELD_NEIGHBOR_RADIUS:
             continue
+
+        relative_x = ox - current_x
+        relative_y = oy - current_y
+
+        motion_mag = math.hypot(ego_vx, ego_vy)
+
+        # Ignore AGVs clearly behind the ego AGV.
+        if motion_mag > 0.05:
+            forward_dot = (relative_x * ego_vx + relative_y * ego_vy) / motion_mag
+
+            if forward_dot < -0.2:
+                continue
 
         risk = assess_collision_risk_2d(
             ego_x=current_x,
@@ -292,37 +383,6 @@ def get_most_critical_risk(current_x, current_y, ego_vx, ego_vy):
     return best_other, best_risk
 
 
-def is_near_aisle_exit(current_x, current_y, aisle_name, threshold=AISLE_EXIT_REQUEST_THRESHOLD):
-    aisle_points = warehouse_waypoints[aisle_name]
-    exit_x, exit_y = aisle_points[-1]
-    return math.hypot(current_x - exit_x, current_y - exit_y) < threshold
-
-
-def get_aisle_exit_requests():
-    requests = []
-
-    for aisle_num in range(2, 18):
-        aisle_name = f"row_a_aisle_{aisle_num}"
-        aisle_points = warehouse_waypoints[aisle_name]
-        exit_x, exit_y = aisle_points[-1]
-
-        for other_name, ox, oy in get_other_agv_positions():
-            if math.hypot(ox - exit_x, oy - exit_y) < AISLE_EXIT_REQUEST_THRESHOLD:
-                requests.append((aisle_name, other_name))
-
-    return requests
-
-
-def is_near_bottom_merge_zone(current_x, current_y, aisle_name, threshold=BOTTOM_MERGE_YIELD_THRESHOLD):
-    bottom_turn_x, bottom_turn_y = get_bottom_turn_point_for_aisle(aisle_name)
-    bottom_wait_x, bottom_wait_y = get_bottom_wait_point_for_aisle(aisle_name)
-
-    near_bottom_turn = math.hypot(current_x - bottom_turn_x, current_y - bottom_turn_y) < threshold
-    near_bottom_wait = math.hypot(current_x - bottom_wait_x, current_y - bottom_wait_y) < threshold
-
-    return near_bottom_turn or near_bottom_wait
-
-
 robot_planner = get_path_planner()
 
 current_waypoint_index = 0
@@ -335,7 +395,6 @@ previous_task = None
 
 waypoint_path = []
 path_initialized = False
-printed_start = False
 
 dwell_start_time = None
 next_mode_after_dwell = None
@@ -343,11 +402,78 @@ next_mode_after_dwell = None
 initial_delay_checked = False
 initial_delay_required = False
 
+# Temporary initial dispatch rule.
+# This is only used before the first task is assigned.
+initial_dispatch_active = True
+
 home_x, home_y = warehouse_waypoints[HOME_GROUP][HOME_INDEX]
+
+logger = ExperimentLogger(robot_name, "LEVEL_C")
+
+active_wait_key = None
+active_shield_key = None
 
 
 def plan_new_path(current_x, current_y, goal_group, goal_index):
     return robot_planner.find_path(current_x, current_y, goal_group, goal_index)
+
+
+def record_wait_event(time_s, dt, event_type, details):
+    global active_wait_key
+
+    logger.add_traffic_wait(dt)
+
+    wait_key = f"{event_type}:{details}"
+    if active_wait_key == wait_key:
+        return
+
+    active_wait_key = wait_key
+
+    if event_type == "HOME_BLOCK":
+        logger.count_home_block(time_s, details)
+    elif event_type == "AISLE_BLOCK":
+        logger.count_aisle_block(time_s, details)
+    elif event_type == "MERGE_YIELD":
+        logger.count_merge_yield(time_s, details)
+    else:
+        logger.log_event(time_s, event_type, details)
+
+
+def record_initial_dispatch_wait_event(time_s, dt, details):
+    global active_wait_key
+
+    logger.add_traffic_wait(dt)
+
+    wait_key = f"INITIAL_DISPATCH_WAIT:{details}"
+    if active_wait_key == wait_key:
+        return
+
+    active_wait_key = wait_key
+    logger.log_event(time_s, "INITIAL_DISPATCH_WAIT", details)
+
+
+def record_shield_event(time_s, dt, shield_mode, blocking_agv, critical_risk):
+    global active_shield_key
+
+    if shield_mode == "PASS":
+        active_shield_key = None
+        return
+
+    logger.add_shield_wait(dt)
+
+    shield_key = f"{shield_mode}:{blocking_agv}"
+    if active_shield_key == shield_key:
+        return
+
+    active_shield_key = shield_key
+
+    logger.count_shield_intervention(
+        time_s,
+        f"mode={shield_mode}, blocker={blocking_agv}, "
+        f"ttc={critical_risk['ttc']:.3f}, "
+        f"headway={critical_risk['headway']:.3f}, "
+        f"gap={critical_risk['gap_m']:.3f}"
+    )
 
 
 while robot.step(timestep) != -1:
@@ -358,6 +484,7 @@ while robot.step(timestep) != -1:
         continue
 
     current_time = robot.getTime()
+    dt = timestep / 1000.0
 
     gps_values = gps.getValues()
     current_x = gps_values[0]
@@ -366,15 +493,28 @@ while robot.step(timestep) != -1:
     compass_values = compass.getValues()
     current_heading = math.atan2(compass_values[0], compass_values[1])
 
+    logger.update_distance(current_x, current_y)
+    logger.update_safety_gaps(current_time, current_x, current_y, get_other_agv_positions())
+
+    if current_time >= EXPERIMENT_DURATION:
+        stop_motors()
+        logger.log_event(current_time, "EXPERIMENT_FINISHED", f"duration={EXPERIMENT_DURATION:.1f}s")
+        logger.maybe_write_summary(current_time)
+        break
+
     if not initial_delay_checked:
         dist_to_home_at_start = math.hypot(current_x - home_x, current_y - home_y)
 
         if dist_to_home_at_start > HOME_DETECTION_THRESHOLD:
             initial_delay_required = True
-            print(f"{robot_name}: not at home on startup, waiting {INITIAL_DELAY_NOT_AT_HOME:.1f}s before moving")
+            logger.log_event(
+                current_time,
+                "INITIAL_DELAY_REQUIRED",
+                f"waiting={INITIAL_DELAY_NOT_AT_HOME:.1f}s"
+            )
         else:
             initial_delay_required = False
-            print(f"{robot_name}: already at home on startup, no initial delay")
+            logger.log_event(current_time, "STARTED_AT_HOME", "no initial delay")
 
         initial_delay_checked = True
 
@@ -384,6 +524,7 @@ while robot.step(timestep) != -1:
 
     if mode == DWELL:
         stop_motors()
+        logger.add_dwell_time(dt)
 
         if dwell_start_time is None:
             dwell_start_time = current_time
@@ -393,25 +534,43 @@ while robot.step(timestep) != -1:
 
             if next_mode_after_dwell == RETURN_HOME:
                 mode = RETURN_HOME
+                logger.log_event(current_time, "DWELL_COMPLETE", "returning_home")
+
             elif next_mode_after_dwell == GO_TO_TARGET:
                 previous_task = current_task
                 current_task = pick_next_task(previous_task)
-                print(f"{robot_name}: loaded at home, next task is {current_task[0]}[{current_task[1]}]")
+
+                if initial_dispatch_active:
+                    initial_dispatch_active = False
+                    logger.log_event(
+                        current_time,
+                        "INITIAL_DISPATCH_COMPLETE",
+                        "temporary bottom-corridor dispatch rule disabled"
+                    )
+
                 mode = GO_TO_TARGET
+                logger.log_event(
+                    current_time,
+                    "NEW_TASK_ASSIGNED",
+                    f"{current_task[0]}[{current_task[1]}]"
+                )
 
             next_mode_after_dwell = None
             path_initialized = False
             waypoint_path = []
             current_waypoint_index = 0
             turn_mode = True
+            active_wait_key = None
+            active_shield_key = None
 
+        logger.maybe_write_summary(current_time)
         continue
 
     if not path_initialized:
         if mode == GO_TO_TARGET:
             if current_task is None:
-                print(f"{robot_name}: no task assigned yet")
                 stop_motors()
+                logger.log_event(current_time, "NO_TASK_ASSIGNED", "")
                 continue
             goal_group, goal_index = current_task
         else:
@@ -422,18 +581,22 @@ while robot.step(timestep) != -1:
         if waypoint_path:
             current_waypoint_index = 0
             turn_mode = True
-            if not printed_start:
-                print(f"{robot_name}: controller started")
-                printed_start = True
-            print(f"{robot_name}: mode={mode}, planning to {goal_group}[{goal_index}] with {len(waypoint_path)} points")
+            active_wait_key = None
+            active_shield_key = None
+            logger.log_event(
+                current_time,
+                "PATH_PLANNED",
+                f"mode={mode}, goal={goal_group}[{goal_index}], points={len(waypoint_path)}"
+            )
         else:
-            print(f"{robot_name}: PATH PLANNING FAILED for {goal_group}[{goal_index}]")
             waypoint_path = []
+            logger.count_path_failure(current_time, f"{goal_group}[{goal_index}]")
 
         path_initialized = True
 
     if not waypoint_path or current_waypoint_index >= len(waypoint_path):
         stop_motors()
+        logger.maybe_write_summary(current_time)
         continue
 
     target_x, target_y = waypoint_path[current_waypoint_index]
@@ -447,38 +610,119 @@ while robot.step(timestep) != -1:
 
     if distance_to_waypoint < WAYPOINT_THRESHOLD:
         current_waypoint_index += 1
+        active_wait_key = None
+        active_shield_key = None
 
         if current_waypoint_index >= len(waypoint_path):
             stop_motors()
 
             if mode == GO_TO_TARGET:
                 reached_group, reached_index = current_task
-                print(f"{robot_name}: reached target {reached_group}[{reached_index}], dwelling before return")
+                logger.count_task_completed(
+                    current_time,
+                    f"{reached_group}[{reached_index}]"
+                )
                 mode = DWELL
                 next_mode_after_dwell = RETURN_HOME
             else:
-                print(f"{robot_name}: reached home, dwelling before loading next task")
+                logger.log_event(current_time, "HOME_REACHED", "")
                 mode = DWELL
                 next_mode_after_dwell = GO_TO_TARGET
 
+            logger.maybe_write_summary(current_time)
             continue
 
         continue
 
-    # LEVEL C: aisle 1 queue behaves like corridor spacing now.
-    # Only keep hard protection for the actual home/loading point.
-    if mode == RETURN_HOME and is_home_target(target_x, target_y):
+    # Common aisle 1/home staging queue control.
+    if is_aisle_1_queue_or_home_target(target_x, target_y):
         occupied, blocking_agv = point_is_occupied_by_other_agv(
-            target_x, target_y,
+            target_x,
+            target_y,
             threshold=QUEUE_OCCUPANCY_THRESHOLD
         )
+
         if occupied:
-            if step_count % 20 == 0:
-                print(f"{robot_name}: blocked at home by {blocking_agv}")
+            record_wait_event(
+                current_time,
+                dt,
+                "HOME_BLOCK",
+                f"target=({target_x:.2f},{target_y:.2f}), blocked_by={blocking_agv}"
+            )
             stop_motors()
+            logger.maybe_write_summary(current_time)
             continue
 
-    # KEEP: aisle-entry protection
+    # Temporary initial dispatch rule only.
+    if initial_dispatch_active:
+        is_bottom_queue, bottom_aisle, bottom_point_type = is_bottom_queue_target(target_x, target_y)
+
+        if is_bottom_queue:
+            occupied, blocking_agv = point_is_occupied_by_other_agv(
+                target_x,
+                target_y,
+                threshold=QUEUE_OCCUPANCY_THRESHOLD
+            )
+
+            if occupied:
+                record_initial_dispatch_wait_event(
+                    current_time,
+                    dt,
+                    f"{bottom_point_type}={bottom_aisle}, blocked_by={blocking_agv}"
+                )
+
+                stop_motors()
+                logger.maybe_write_summary(current_time)
+                continue
+
+    # Level C bottom-corridor hard-yield rule.
+    # Hard-yield only while another AGV is still near the aisle exit.
+    # Once that AGV reaches bottom turn, the hard-yield rule releases and Safety Shield manages spacing.
+    if mode == RETURN_HOME and not initial_dispatch_active:
+        current_bottom_slot_aisle, slot_distance = get_nearest_bottom_wait_aisle(
+            current_x,
+            current_y,
+            threshold=BOTTOM_CORRIDOR_YIELD_WAIT_THRESHOLD
+        )
+
+        if current_bottom_slot_aisle is not None:
+            next_left_aisle = get_next_left_aisle_name(current_bottom_slot_aisle)
+
+            if next_left_aisle is not None:
+                exit_conflict, exiting_agv = other_agv_near_aisle_exit_only(next_left_aisle)
+
+                if exit_conflict:
+                    record_wait_event(
+                        current_time,
+                        dt,
+                        "MERGE_YIELD",
+                        f"bottom_corridor_wait={current_bottom_slot_aisle}, "
+                        f"yielding_to_exiting_agv={exiting_agv}, "
+                        f"conflict_aisle={next_left_aisle}"
+                    )
+                    stop_motors()
+                    logger.maybe_write_summary(current_time)
+                    continue
+
+            # Next-slot protection is still kept to prevent queue compression.
+            next_x, next_y = get_next_left_bottom_target(current_bottom_slot_aisle)
+            occupied, blocking_agv = point_is_occupied_by_other_agv(
+                next_x,
+                next_y,
+                threshold=QUEUE_OCCUPANCY_THRESHOLD
+            )
+
+            if occupied:
+                record_wait_event(
+                    current_time,
+                    dt,
+                    "MERGE_YIELD",
+                    f"bottom_wait_next_slot={current_bottom_slot_aisle}, blocked_by={blocking_agv}"
+                )
+                stop_motors()
+                logger.maybe_write_summary(current_time)
+                continue
+
     if mode == GO_TO_TARGET and current_task is not None:
         task_aisle = get_task_aisle_name_from_task(current_task)
         first_x, first_y = get_first_point_for_aisle(task_aisle)
@@ -488,44 +732,19 @@ while robot.step(timestep) != -1:
             bottom_turn_occupied, bottom_turn_blocker = other_agv_occupies_bottom_turn(task_aisle)
 
             if aisle_occupied or bottom_turn_occupied:
-                if step_count % 20 == 0:
-                    print(
-                        f"{robot_name}: blocked from entering {task_aisle}, "
-                        f"aisle_occupied={aisle_occupied} ({aisle_blocker}), "
-                        f"bottom_turn_occupied={bottom_turn_occupied} ({bottom_turn_blocker})"
-                    )
+                record_wait_event(
+                    current_time,
+                    dt,
+                    "AISLE_BLOCK",
+                    f"aisle={task_aisle}, "
+                    f"aisle_blocker={aisle_blocker}, "
+                    f"bottom_turn_blocker={bottom_turn_blocker}"
+                )
                 stop_motors()
+                logger.maybe_write_summary(current_time)
                 continue
 
-    # LEVEL C STRUCTURAL MERGE RULE:
-    # bottom corridor AGVs must leave space if another AGV is near waypoint 8
-    # of an aisle and may need to exit first.
-    if mode == RETURN_HOME:
-        should_yield_bottom_merge = False
-        yielding_aisle = None
-        yielding_blocker = None
-
-        exit_requests = get_aisle_exit_requests()
-
-        for exit_aisle, exit_blocker in exit_requests:
-            if current_task is not None and current_task[0] == exit_aisle:
-                if is_near_aisle_exit(current_x, current_y, exit_aisle, threshold=AISLE_EXIT_REQUEST_THRESHOLD):
-                    continue
-
-            if is_near_bottom_merge_zone(current_x, current_y, exit_aisle, threshold=BOTTOM_MERGE_YIELD_THRESHOLD):
-                should_yield_bottom_merge = True
-                yielding_aisle = exit_aisle
-                yielding_blocker = exit_blocker
-                break
-
-        if should_yield_bottom_merge:
-            if step_count % 20 == 0:
-                print(
-                    f"{robot_name}: yielding on bottom corridor, "
-                    f"{yielding_blocker} near exit of {yielding_aisle}"
-                )
-            stop_motors()
-            continue
+    active_wait_key = None
 
     angular_velocity = max(-MAX_W, min(MAX_W, K_THETA * angle_diff))
 
@@ -546,8 +765,8 @@ while robot.step(timestep) != -1:
 
     shield_mode = "PASS"
 
-    # LEVEL C: SAFETY SHIELD SUPERVISORY LAYER
-    if not is_home_target(target_x, target_y):
+    # Apply the Safety Shield only during forward movement.
+    if (not turn_mode) and (not is_aisle_1_queue_or_home_target(target_x, target_y)):
         ego_vx, ego_vy = estimate_ego_velocity_components(linear_velocity, current_heading)
         blocking_agv, critical_risk = get_most_critical_risk(current_x, current_y, ego_vx, ego_vy)
 
@@ -566,31 +785,32 @@ while robot.step(timestep) != -1:
                 critical_risk
             )
 
-            if step_count % SHIELD_MODE_LOG_EVERY == 0:
-                print(
-                    f"{robot_name}: shield_mode={shield_mode}, "
-                    f"blocker={blocking_agv}, "
-                    f"ttc={critical_risk['ttc']:.2f}, "
-                    f"headway={critical_risk['headway']:.2f}, "
-                    f"gap={critical_risk['gap_m']:.2f}"
-                )
+            record_shield_event(current_time, dt, shield_mode, blocking_agv, critical_risk)
+        else:
+            active_shield_key = None
+    else:
+        active_shield_key = None
 
     left_velocity = (linear_velocity - 0.5 * AXLE_LENGTH * angular_velocity) / WHEEL_RADIUS
     right_velocity = (linear_velocity + 0.5 * AXLE_LENGTH * angular_velocity) / WHEEL_RADIUS
 
-    if step_count % 20 == 0:
-        print(
-            f"{robot_name} | mode={mode} "
-            f"pos=({current_x:.2f},{current_y:.2f}) "
-            f"target=({target_x:.2f},{target_y:.2f}) "
-            f"dist={distance_to_waypoint:.2f} "
-            f"heading={math.degrees(current_heading):.1f}deg "
-            f"angle_diff={math.degrees(angle_diff):.1f}deg "
-            f"turn_mode={turn_mode} "
-            f"shield={shield_mode} "
-            f"v={linear_velocity:.2f} "
-            f"w={angular_velocity:.2f}"
-        )
+    logger.maybe_log_trajectory(
+        current_time,
+        mode,
+        current_x,
+        current_y,
+        target_x,
+        target_y,
+        distance_to_waypoint,
+        current_heading,
+        angle_diff,
+        linear_velocity,
+        angular_velocity,
+        turn_mode,
+        shield_mode
+    )
+
+    logger.maybe_write_summary(current_time)
 
     front_left_motor.setVelocity(left_velocity)
     back_left_motor.setVelocity(left_velocity)

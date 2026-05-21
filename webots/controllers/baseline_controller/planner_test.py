@@ -1,216 +1,109 @@
-import math
-import heapq
-from waypoints import warehouse_waypoints
+SHIELD_SAFETY_RADIUS = 0.5
+SHIELD_NEIGHBOR_RADIUS = 5.0
 
 
-class PathPlanner:
-    def __init__(self):
-        self.nodes = {}
-        self.graph = {}
-        self._build_graph()
+def estimate_ego_velocity_components(linear_velocity, heading_rad):
+    vx = linear_velocity * math.cos(heading_rad)
+    vy = linear_velocity * math.sin(heading_rad)
+    return vx, vy
 
-    def _add_node(self, node_id, point):
-        self.nodes[node_id] = point
-        if node_id not in self.graph:
-            self.graph[node_id] = []
 
-    def _add_edge(self, a, b):
-        ax, ay = self.nodes[a]
-        bx, by = self.nodes[b]
-        cost = math.hypot(bx - ax, by - ay)
-        self.graph[a].append((b, cost))
-        self.graph[b].append((a, cost))
+def get_most_critical_risk(current_x, current_y, ego_vx, ego_vy):
+    best_risk = None
+    best_other = None
 
-    def _add_directed_edge(self, a, b):
-        ax, ay = self.nodes[a]
-        bx, by = self.nodes[b]
-        cost = math.hypot(bx - ax, by - ay)
-        self.graph[a].append((b, cost))
+    for other_name, ox, oy in get_other_agv_positions():
+        gap = math.hypot(ox - current_x, oy - current_y)
 
-    def _build_graph(self):
-        # 1) Add all nodes
-        for group_name, points in warehouse_waypoints.items():
-            for i, point in enumerate(points):
-                node_id = f"{group_name}_{i}"
-                self._add_node(node_id, point)
+        if gap > SHIELD_NEIGHBOR_RADIUS:
+            continue
 
-        # 2) Connect internal points
-        # aisle 1: bottom -> top (queue / return lane)
-        # aisles 2-17: top -> bottom (task aisles)
-        for group_name, points in warehouse_waypoints.items():
-            is_main_aisle = (
-                group_name.startswith("row_a_aisle_")
-                and not group_name.endswith("_top_turn")
-                and not group_name.endswith("_bottom_turn")
-                and not group_name.endswith("_top_wait")
-                and not group_name.endswith("_bottom_wait")
-            )
+        relative_x = ox - current_x
+        relative_y = oy - current_y
 
-            if is_main_aisle:
-                if group_name == "row_a_aisle_1":
-                    for i in range(len(points) - 1):
-                        a = f"{group_name}_{i+1}"
-                        b = f"{group_name}_{i}"
-                        self._add_directed_edge(a, b)
-                else:
-                    for i in range(len(points) - 1):
-                        a = f"{group_name}_{i}"
-                        b = f"{group_name}_{i+1}"
-                        self._add_directed_edge(a, b)
-            else:
-                for i in range(len(points) - 1):
-                    a = f"{group_name}_{i}"
-                    b = f"{group_name}_{i+1}"
-                    self._add_edge(a, b)
+        motion_mag = math.hypot(ego_vx, ego_vy)
 
-        aisle_indices = self._rack_a_indices()
+        # Ignore AGVs clearly behind the ego AGV.
+        if motion_mag > 0.05:
+            forward_dot = (relative_x * ego_vx + relative_y * ego_vy) / motion_mag
 
-        # 3) Special connections for aisles 2-17
-        for idx in aisle_indices:
-            if idx == 1:
+            if forward_dot < -0.2:
                 continue
 
-            aisle = f"row_a_aisle_{idx}"
-            top_turn = f"{aisle}_top_turn"
-            bottom_turn = f"{aisle}_bottom_turn"
-            top_wait = f"{aisle}_top_wait"
-            bottom_wait = f"{aisle}_bottom_wait"
+        risk = assess_collision_risk_2d(
+            ego_x=current_x,
+            ego_y=current_y,
+            ego_vx=ego_vx,
+            ego_vy=ego_vy,
+            other_x=ox,
+            other_y=oy,
+            other_vx=0.0,
+            other_vy=0.0,
+            safety_radius=SHIELD_SAFETY_RADIUS,
+        )
 
-            aisle_points = warehouse_waypoints.get(aisle, [])
-            top_points = warehouse_waypoints.get(top_turn, [])
-            bottom_points = warehouse_waypoints.get(bottom_turn, [])
-            top_wait_points = warehouse_waypoints.get(top_wait, [])
-            bottom_wait_points = warehouse_waypoints.get(bottom_wait, [])
+        if best_risk is None:
+            best_risk = risk
+            best_other = other_name
+        else:
+            current_score = min(best_risk["ttc"], best_risk["headway"])
+            new_score = min(risk["ttc"], risk["headway"])
 
-            # outbound: top corridor -> top wait -> top turn -> aisle
-            if top_wait_points and top_points:
-                self._add_directed_edge(f"{top_wait}_0", f"{top_turn}_0")
+            if new_score < current_score:
+                best_risk = risk
+                best_other = other_name
 
-            if aisle_points and top_points:
-                self._add_directed_edge(f"{top_turn}_0", f"{aisle}_0")
-
-            # return: aisle -> bottom turn -> bottom wait -> bottom corridor
-            if aisle_points and bottom_points:
-                self._add_directed_edge(f"{aisle}_{len(aisle_points)-1}", f"{bottom_turn}_0")
-
-            if bottom_points and bottom_wait_points:
-                self._add_directed_edge(f"{bottom_turn}_0", f"{bottom_wait}_0")
-
-        # 4) Corridor flow through wait nodes
-        for i in range(2, len(aisle_indices)):
-            a_idx = i
-            b_idx = i + 1
-
-            a_top_wait = f"row_a_aisle_{a_idx}_top_wait_0"
-            b_top_wait = f"row_a_aisle_{b_idx}_top_wait_0"
-            a_bottom_wait = f"row_a_aisle_{a_idx}_bottom_wait_0"
-            b_bottom_wait = f"row_a_aisle_{b_idx}_bottom_wait_0"
-
-            # top corridor: left -> right
-            if a_top_wait in self.nodes and b_top_wait in self.nodes:
-                self._add_directed_edge(a_top_wait, b_top_wait)
-
-            # bottom corridor: right -> left
-            if a_bottom_wait in self.nodes and b_bottom_wait in self.nodes:
-                self._add_directed_edge(b_bottom_wait, a_bottom_wait)
-
-        # 5) Aisle 1 special lane
-        # Return from bottom corridor into aisle 1
-        if "row_a_aisle_2_bottom_wait_0" in self.nodes and "row_a_aisle_1_bottom_turn_0" in self.nodes:
-            self._add_directed_edge("row_a_aisle_2_bottom_wait_0", "row_a_aisle_1_bottom_turn_0")
-
-        if "row_a_aisle_1_bottom_turn_0" in self.nodes and "row_a_aisle_1_7" in self.nodes:
-            self._add_directed_edge("row_a_aisle_1_bottom_turn_0", "row_a_aisle_1_7")
-
-        # Queue lane up aisle 1 ends at home
-        if "row_a_aisle_1_0" in self.nodes and "row_a_aisle_1_top_turn_0" in self.nodes:
-            self._add_directed_edge("row_a_aisle_1_0", "row_a_aisle_1_top_turn_0")
-
-        # Outbound from home into top corridor
-        if "row_a_aisle_1_top_turn_0" in self.nodes and "row_a_aisle_2_top_wait_0" in self.nodes:
-            self._add_directed_edge("row_a_aisle_1_top_turn_0", "row_a_aisle_2_top_wait_0")
-
-    def _rack_a_indices(self):
-        found = []
-        i = 1
-        while True:
-            if f"row_a_aisle_{i}" in warehouse_waypoints:
-                found.append(i)
-                i += 1
-            else:
-                break
-        return found
-
-    def _heuristic(self, a, b):
-        ax, ay = self.nodes[a]
-        bx, by = self.nodes[b]
-        return math.hypot(bx - ax, by - ay)
-
-    def _nearest_node(self, x, y):
-        best_node = None
-        best_dist = float("inf")
-        for node_id, (nx, ny) in self.nodes.items():
-            d = math.hypot(nx - x, ny - y)
-            if d < best_dist:
-                best_dist = d
-                best_node = node_id
-        return best_node
-
-    def _reconstruct_path(self, came_from, current):
-        path = [current]
-        while current in came_from:
-            current = came_from[current]
-            path.append(current)
-        path.reverse()
-        return [self.nodes[node_id] for node_id in path]
-
-    def find_path_by_node_ids(self, start_node, goal_node):
-        if start_node not in self.nodes or goal_node not in self.nodes:
-            return []
-
-        open_heap = []
-        heapq.heappush(open_heap, (0, start_node))
-
-        came_from = {}
-        g_score = {node: float("inf") for node in self.nodes}
-        f_score = {node: float("inf") for node in self.nodes}
-
-        g_score[start_node] = 0
-        f_score[start_node] = self._heuristic(start_node, goal_node)
-
-        open_set = {start_node}
-
-        while open_heap:
-            _, current = heapq.heappop(open_heap)
-            open_set.discard(current)
-
-            if current == goal_node:
-                return self._reconstruct_path(came_from, current)
-
-            for neighbor, cost in self.graph[current]:
-                tentative_g = g_score[current] + cost
-                if tentative_g < g_score[neighbor]:
-                    came_from[neighbor] = current
-                    g_score[neighbor] = tentative_g
-                    f_score[neighbor] = tentative_g + self._heuristic(neighbor, goal_node)
-
-                    if neighbor not in open_set:
-                        heapq.heappush(open_heap, (f_score[neighbor], neighbor))
-                        open_set.add(neighbor)
-
-        return []
-
-    def find_path(self, start_x, start_y, goal_group, goal_index=0):
-        start_node = self._nearest_node(start_x, start_y)
-        goal_node = f"{goal_group}_{goal_index}"
-        return self.find_path_by_node_ids(start_node, goal_node)
+    return best_other, best_risk
 
 
-_path_planner = None
+def record_shield_event(time_s, dt, shield_mode, blocking_agv, critical_risk):
+    global active_shield_key
+
+    if shield_mode == "PASS":
+        active_shield_key = None
+        return
+
+    logger.add_shield_wait(dt)
+
+    shield_key = f"{shield_mode}:{blocking_agv}"
+    if active_shield_key == shield_key:
+        return
+
+    active_shield_key = shield_key
+
+    logger.count_shield_intervention(
+        time_s,
+        f"mode={shield_mode}, blocker={blocking_agv}, "
+        f"ttc={critical_risk['ttc']:.3f}, "
+        f"headway={critical_risk['headway']:.3f}, "
+        f"gap={critical_risk['gap_m']:.3f}"
+    )
 
 
-def get_path_planner():
-    global _path_planner
-    if _path_planner is None:
-        _path_planner = PathPlanner()
-    return _path_planner
+shield_mode = "PASS"
+
+# Apply the supervisory layer only during forward movement.
+if (not turn_mode) and (not is_aisle_1_queue_or_home_target(target_x, target_y)):
+    ego_vx, ego_vy = estimate_ego_velocity_components(linear_velocity, current_heading)
+    blocking_agv, critical_risk = get_most_critical_risk(current_x, current_y, ego_vx, ego_vy)
+
+    if critical_risk is not None:
+        shield_state = {
+            "ego_x": current_x,
+            "ego_y": current_y,
+            "ego_vx": ego_vx,
+            "ego_vy": ego_vy,
+            "v_cap": MAX_V,
+        }
+
+        shield_mode, (linear_velocity, angular_velocity) = supervise_commands(
+            shield_state,
+            (linear_velocity, angular_velocity),
+            critical_risk
+        )
+
+        record_shield_event(current_time, dt, shield_mode, blocking_agv, critical_risk)
+    else:
+        active_shield_key = None
+else:
+    active_shield_key = None

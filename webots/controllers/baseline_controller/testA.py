@@ -3,6 +3,7 @@ import math
 import random
 from waypoints import warehouse_waypoints
 from path_planner import get_path_planner
+from experiment_logger import ExperimentLogger
 
 robot = Supervisor()
 timestep = int(robot.getBasicTimeStep())
@@ -46,9 +47,8 @@ TURN_MODE_EXIT_THRESHOLD = 0.10
 
 DWELL_TIME = 5.0
 
+# Minimal Level A home/staging queue control
 QUEUE_OCCUPANCY_THRESHOLD = 1.0
-AISLE_OCCUPANCY_THRESHOLD = 2.0
-TOP_TURN_WAIT_THRESHOLD = 1.0
 
 HOME_GROUP = "row_a_aisle_1_top_turn"
 HOME_INDEX = 0
@@ -57,12 +57,14 @@ GO_TO_TARGET = "GO_TO_TARGET"
 RETURN_HOME = "RETURN_HOME"
 DWELL = "DWELL"
 
+EXPERIMENT_DURATION = 3600.0  # seconds
+
 VALID_TASKS = []
 for aisle_num in range(2, 18):
     for wp_idx in range(1, 7):
         VALID_TASKS.append((f"row_a_aisle_{aisle_num}", wp_idx))
 
-AGV_DEF_NAMES = [f"AGV_{i}" for i in range(1, 9)]
+AGV_DEF_NAMES = [f"AGV_{i}" for i in range(1, 21)]
 
 
 def normalize_angle(angle):
@@ -81,7 +83,6 @@ def stop_motors():
 
 
 def pick_next_task(previous_task=None):
-   #return ("row_a_aisle_3", 2)
     candidates = VALID_TASKS[:]
     if previous_task in candidates and len(candidates) > 1:
         candidates.remove(previous_task)
@@ -123,8 +124,9 @@ def point_is_occupied_by_other_agv(target_x, target_y, threshold=QUEUE_OCCUPANCY
 def is_aisle_1_queue_or_home_target(target_x, target_y):
     aisle1_points = warehouse_waypoints["row_a_aisle_1"]
     home_point = warehouse_waypoints["row_a_aisle_1_top_turn"][0]
+    bottom_turn_point = warehouse_waypoints["row_a_aisle_1_bottom_turn"][0]
 
-    all_queue_points = aisle1_points + [home_point]
+    all_queue_points = aisle1_points + [home_point, bottom_turn_point]
 
     for px, py in all_queue_points:
         if math.hypot(target_x - px, target_y - py) < 0.5:
@@ -133,39 +135,24 @@ def is_aisle_1_queue_or_home_target(target_x, target_y):
     return False
 
 
-def get_task_aisle_name_from_task(task):
-    if task is None:
-        return None
-    return task[0]
+def is_bottom_queue_target(target_x, target_y):
+    for aisle_num in range(1, 18):
+        aisle_name = f"row_a_aisle_{aisle_num}"
 
+        bottom_turn_key = f"{aisle_name}_bottom_turn"
+        bottom_wait_key = f"{aisle_name}_bottom_wait"
 
-def get_first_point_for_aisle(aisle_name):
-    return warehouse_waypoints[aisle_name][0]
+        if bottom_turn_key in warehouse_waypoints:
+            bx, by = warehouse_waypoints[bottom_turn_key][0]
+            if math.hypot(target_x - bx, target_y - by) < 1.0:
+                return True, aisle_name, "bottom_turn"
 
+        if bottom_wait_key in warehouse_waypoints:
+            wx, wy = warehouse_waypoints[bottom_wait_key][0]
+            if math.hypot(target_x - wx, target_y - wy) < 1.0:
+                return True, aisle_name, "bottom_wait"
 
-def target_matches_point(target_x, target_y, point_x, point_y, threshold=TOP_TURN_WAIT_THRESHOLD):
-    return math.hypot(target_x - point_x, target_y - point_y) < threshold
-
-
-def other_agv_occupies_aisle(aisle_name, threshold=AISLE_OCCUPANCY_THRESHOLD):
-    aisle_points = warehouse_waypoints[aisle_name]
-
-    for other_name, ox, oy in get_other_agv_positions():
-        for px, py in aisle_points:
-            if math.hypot(ox - px, oy - py) < threshold:
-                return True, other_name
-
-    return False, None
-
-
-def other_agv_occupies_bottom_turn(aisle_name, threshold=AISLE_OCCUPANCY_THRESHOLD):
-    bx, by = warehouse_waypoints[f"{aisle_name}_bottom_turn"][0]
-
-    for other_name, ox, oy in get_other_agv_positions():
-        if math.hypot(ox - bx, oy - by) < threshold:
-            return True, other_name
-
-    return False, None
+    return False, None, None
 
 
 robot_planner = get_path_planner()
@@ -180,7 +167,6 @@ previous_task = None
 
 waypoint_path = []
 path_initialized = False
-printed_start = False
 
 dwell_start_time = None
 next_mode_after_dwell = None
@@ -188,11 +174,45 @@ next_mode_after_dwell = None
 initial_delay_checked = False
 initial_delay_required = False
 
+# Temporary initial dispatch rule.
+# This is only used before the first task is assigned.
+initial_dispatch_active = True
+
 home_x, home_y = warehouse_waypoints[HOME_GROUP][HOME_INDEX]
+
+logger = ExperimentLogger(robot_name, "LEVEL_A")
+
+active_wait_key = None
 
 
 def plan_new_path(current_x, current_y, goal_group, goal_index):
     return robot_planner.find_path(current_x, current_y, goal_group, goal_index)
+
+
+def record_home_wait_event(time_s, dt, details):
+    global active_wait_key
+
+    logger.add_traffic_wait(dt)
+
+    wait_key = f"HOME_BLOCK:{details}"
+    if active_wait_key == wait_key:
+        return
+
+    active_wait_key = wait_key
+    logger.count_home_block(time_s, details)
+
+
+def record_initial_dispatch_wait_event(time_s, dt, details):
+    global active_wait_key
+
+    logger.add_traffic_wait(dt)
+
+    wait_key = f"INITIAL_DISPATCH_WAIT:{details}"
+    if active_wait_key == wait_key:
+        return
+
+    active_wait_key = wait_key
+    logger.log_event(time_s, "INITIAL_DISPATCH_WAIT", details)
 
 
 while robot.step(timestep) != -1:
@@ -203,6 +223,7 @@ while robot.step(timestep) != -1:
         continue
 
     current_time = robot.getTime()
+    dt = timestep / 1000.0
 
     gps_values = gps.getValues()
     current_x = gps_values[0]
@@ -211,16 +232,28 @@ while robot.step(timestep) != -1:
     compass_values = compass.getValues()
     current_heading = math.atan2(compass_values[0], compass_values[1])
 
-    # INITIAL DELAY CHECK
+    logger.update_distance(current_x, current_y)
+    logger.update_safety_gaps(current_time, current_x, current_y, get_other_agv_positions())
+
+    if current_time >= EXPERIMENT_DURATION:
+        stop_motors()
+        logger.log_event(current_time, "EXPERIMENT_FINISHED", f"duration={EXPERIMENT_DURATION:.1f}s")
+        logger.maybe_write_summary(current_time)
+        break
+
     if not initial_delay_checked:
         dist_to_home_at_start = math.hypot(current_x - home_x, current_y - home_y)
 
         if dist_to_home_at_start > HOME_DETECTION_THRESHOLD:
             initial_delay_required = True
-            print(f"{robot_name}: not at home on startup, waiting {INITIAL_DELAY_NOT_AT_HOME:.1f}s before moving")
+            logger.log_event(
+                current_time,
+                "INITIAL_DELAY_REQUIRED",
+                f"waiting={INITIAL_DELAY_NOT_AT_HOME:.1f}s"
+            )
         else:
             initial_delay_required = False
-            print(f"{robot_name}: already at home on startup, no initial delay")
+            logger.log_event(current_time, "STARTED_AT_HOME", "no initial delay")
 
         initial_delay_checked = True
 
@@ -228,9 +261,9 @@ while robot.step(timestep) != -1:
         stop_motors()
         continue
 
-    # DWELL MODE
     if mode == DWELL:
         stop_motors()
+        logger.add_dwell_time(dt)
 
         if dwell_start_time is None:
             dwell_start_time = current_time
@@ -240,27 +273,44 @@ while robot.step(timestep) != -1:
 
             if next_mode_after_dwell == RETURN_HOME:
                 mode = RETURN_HOME
+                logger.log_event(current_time, "DWELL_COMPLETE", "returning_home")
 
             elif next_mode_after_dwell == GO_TO_TARGET:
                 previous_task = current_task
                 current_task = pick_next_task(previous_task)
-                print(f"{robot_name}: loaded at home, next task is {current_task[0]}[{current_task[1]}]")
+
+                # First real task has now started.
+                # From this point, Level A no longer uses temporary bottom-corridor dispatch control.
+                if initial_dispatch_active:
+                    initial_dispatch_active = False
+                    logger.log_event(
+                        current_time,
+                        "INITIAL_DISPATCH_COMPLETE",
+                        "temporary bottom-corridor dispatch rule disabled"
+                    )
+
                 mode = GO_TO_TARGET
+                logger.log_event(
+                    current_time,
+                    "NEW_TASK_ASSIGNED",
+                    f"{current_task[0]}[{current_task[1]}]"
+                )
 
             next_mode_after_dwell = None
             path_initialized = False
             waypoint_path = []
             current_waypoint_index = 0
             turn_mode = True
+            active_wait_key = None
 
+        logger.maybe_write_summary(current_time)
         continue
 
-    # PATH PLANNING
     if not path_initialized:
         if mode == GO_TO_TARGET:
             if current_task is None:
-                print(f"{robot_name}: no task assigned yet")
                 stop_motors()
+                logger.log_event(current_time, "NO_TASK_ASSIGNED", "")
                 continue
             goal_group, goal_index = current_task
         else:
@@ -271,18 +321,21 @@ while robot.step(timestep) != -1:
         if waypoint_path:
             current_waypoint_index = 0
             turn_mode = True
-            if not printed_start:
-                print(f"{robot_name}: controller started")
-                printed_start = True
-            print(f"{robot_name}: mode={mode}, planning to {goal_group}[{goal_index}] with {len(waypoint_path)} points")
+            active_wait_key = None
+            logger.log_event(
+                current_time,
+                "PATH_PLANNED",
+                f"mode={mode}, goal={goal_group}[{goal_index}], points={len(waypoint_path)}"
+            )
         else:
-            print(f"{robot_name}: PATH PLANNING FAILED for {goal_group}[{goal_index}]")
             waypoint_path = []
+            logger.count_path_failure(current_time, f"{goal_group}[{goal_index}]")
 
         path_initialized = True
 
     if not waypoint_path or current_waypoint_index >= len(waypoint_path):
         stop_motors()
+        logger.maybe_write_summary(current_time)
         continue
 
     target_x, target_y = waypoint_path[current_waypoint_index]
@@ -294,70 +347,73 @@ while robot.step(timestep) != -1:
     angle_to_waypoint = math.atan2(dy, dx)
     angle_diff = normalize_angle(angle_to_waypoint - current_heading)
 
-    # WAYPOINT REACHED
     if distance_to_waypoint < WAYPOINT_THRESHOLD:
         current_waypoint_index += 1
+        active_wait_key = None
 
         if current_waypoint_index >= len(waypoint_path):
             stop_motors()
 
             if mode == GO_TO_TARGET:
                 reached_group, reached_index = current_task
-                print(f"{robot_name}: reached target {reached_group}[{reached_index}], dwelling before return")
+                logger.count_task_completed(
+                    current_time,
+                    f"{reached_group}[{reached_index}]"
+                )
                 mode = DWELL
                 next_mode_after_dwell = RETURN_HOME
 
             else:
-                print(f"{robot_name}: reached home, dwelling before loading next task")
+                logger.log_event(current_time, "HOME_REACHED", "")
                 mode = DWELL
                 next_mode_after_dwell = GO_TO_TARGET
 
+            logger.maybe_write_summary(current_time)
             continue
 
         continue
 
-    # LEVEL B STEP 1: AISLE 1 QUEUE SAFETY
-    if mode == RETURN_HOME and is_aisle_1_queue_or_home_target(target_x, target_y):
+    # Level A common aisle 1/home staging queue control.
+    # This remains active throughout the whole experiment.
+    if is_aisle_1_queue_or_home_target(target_x, target_y):
         occupied, blocking_agv = point_is_occupied_by_other_agv(target_x, target_y)
 
         if occupied:
+            record_home_wait_event(
+                current_time,
+                dt,
+                f"target=({target_x:.2f},{target_y:.2f}), blocked_by={blocking_agv}"
+            )
             stop_motors()
-
-            if step_count % 20 == 0:
-                print(
-                    f"{robot_name}: waiting for aisle 1 queue slot/home to clear, "
-                    f"blocked by {blocking_agv} at ({target_x:.2f}, {target_y:.2f})"
-                )
-
+            logger.maybe_write_summary(current_time)
             continue
 
-    # LEVEL B STEP 2 + STEP 3:
-    # task aisle entry allowed only if aisle body is clear
-    # and bottom turning waypoint is clear
-    if mode == GO_TO_TARGET and current_task is not None:
-        task_aisle = get_task_aisle_name_from_task(current_task)
-        first_x, first_y = get_first_point_for_aisle(task_aisle)
+    # Temporary initial dispatch rule only.
+    # This uses the Level B bottom-corridor waiting-point method only before the first task starts.
+    # After INITIAL_DISPATCH_COMPLETE, Level A returns to pure baseline behaviour.
+    if initial_dispatch_active:
+        is_bottom_queue, bottom_aisle, bottom_point_type = is_bottom_queue_target(target_x, target_y)
 
-        if target_matches_point(target_x, target_y, first_x, first_y):
-            aisle_occupied, aisle_blocker = other_agv_occupies_aisle(task_aisle)
-            bottom_turn_occupied, bottom_turn_blocker = other_agv_occupies_bottom_turn(task_aisle)
+        if is_bottom_queue:
+            occupied, blocking_agv = point_is_occupied_by_other_agv(
+                target_x,
+                target_y,
+                threshold=QUEUE_OCCUPANCY_THRESHOLD
+            )
 
-            if aisle_occupied or bottom_turn_occupied:
+            if occupied:
+                record_initial_dispatch_wait_event(
+                    current_time,
+                    dt,
+                    f"{bottom_point_type}={bottom_aisle}, blocked_by={blocking_agv}"
+                )
+
                 stop_motors()
-
-                if step_count % 20 == 0:
-                    if aisle_occupied:
-                        print(
-                            f"{robot_name}: waiting at top side, aisle {task_aisle} occupied by {aisle_blocker}"
-                        )
-                    elif bottom_turn_occupied:
-                        print(
-                            f"{robot_name}: waiting at top side, aisle {task_aisle} bottom turn occupied by {bottom_turn_blocker}"
-                        )
-
+                logger.maybe_write_summary(current_time)
                 continue
 
-    # MOTION CONTROL
+    active_wait_key = None
+
     angular_velocity = max(-MAX_W, min(MAX_W, K_THETA * angle_diff))
 
     if turn_mode:
@@ -378,18 +434,23 @@ while robot.step(timestep) != -1:
     left_velocity = (linear_velocity - 0.5 * AXLE_LENGTH * angular_velocity) / WHEEL_RADIUS
     right_velocity = (linear_velocity + 0.5 * AXLE_LENGTH * angular_velocity) / WHEEL_RADIUS
 
-    if step_count % 20 == 0:
-        print(
-            f"{robot_name} | mode={mode} "
-            f"pos=({current_x:.2f},{current_y:.2f}) "
-            f"target=({target_x:.2f},{target_y:.2f}) "
-            f"dist={distance_to_waypoint:.2f} "
-            f"heading={math.degrees(current_heading):.1f}deg "
-            f"angle_diff={math.degrees(angle_diff):.1f}deg "
-            f"turn_mode={turn_mode} "
-            f"v={linear_velocity:.2f} "
-            f"w={angular_velocity:.2f}"
-        )
+    logger.maybe_log_trajectory(
+        current_time,
+        mode,
+        current_x,
+        current_y,
+        target_x,
+        target_y,
+        distance_to_waypoint,
+        current_heading,
+        angle_diff,
+        linear_velocity,
+        angular_velocity,
+        turn_mode,
+        "NA"
+    )
+
+    logger.maybe_write_summary(current_time)
 
     front_left_motor.setVelocity(left_velocity)
     back_left_motor.setVelocity(left_velocity)
